@@ -100,7 +100,7 @@ outlives the variable it was made in.
 What is here
 ------------
 
-| | |
+| area | what it covers |
 |---|---|
 | **Surfaces** | image, PDF, SVG, PostScript, recording; similar surfaces, sub-surfaces, device offset and scale |
 | **Pixels** | direct access to an image surface's bytes, and `image_surface_for_data` over a buffer the caller owns |
