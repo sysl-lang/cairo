@@ -1,0 +1,128 @@
+// The affine transform, and the two little structs cairo measures text into.
+//
+// **These are values, not handles.** Cairo never allocates one and never owns one: every function
+// that takes a matrix takes a pointer to the *caller's* storage and reads or writes it in place, so
+// there is nothing here to destroy and nothing to reference count. That is why they are plain sysl
+// structs while a surface is a wrapper around a pointer.
+//
+// The layout is C's, which is what makes the pointer legal: six contiguous `double`s in the order
+// cairo declares them. `ptr_cast(&m)` is how one is handed over, and cairo writes back through it.
+
+module sh.sysl.cairo
+
+import sh.sysl.cairo.externs
+
+// An affine transform, as cairo lays one out.
+//
+//     x_new = xx * x + xy * y + x0
+//     y_new = yx * x + yy * y + y0
+//
+// The field order is the header's, which puts the two `x` coefficients of *different* rows next to
+// each other — `xx, yx, xy, yy, x0, y0`. It reads oddly and it is not negotiable, because C writes
+// through this storage.
+struct Matrix
+    xx: real
+    yx: real
+    xy: real
+    yy: real
+    x0: real
+    y0: real
+
+    // The pointer cairo writes through. Private because a caller has no use for it and because a
+    // pointer into a `self` copy is exactly the mistake the SDL3 binding documents.
+    ptr(*self) -> *real = ptr_cast(self)
+
+    // Overwrite this matrix with the identity, or with a single translation, scale or rotation.
+    init_identity(*self) = externs.matrix_init_identity(self.ptr())
+    init_translate(*self, tx: real, ty: real) = externs.matrix_init_translate(self.ptr(), tx, ty)
+    init_scale(*self, sx: real, sy: real) = externs.matrix_init_scale(self.ptr(), sx, sy)
+    init_rotate(*self, radians: real) = externs.matrix_init_rotate(self.ptr(), radians)
+
+    // Apply a transform to this one, as though it happened before whatever this matrix already does.
+    translate(*self, tx: real, ty: real) = externs.matrix_translate(self.ptr(), tx, ty)
+    scale(*self, sx: real, sy: real) = externs.matrix_scale(self.ptr(), sx, sy)
+    rotate(*self, radians: real) = externs.matrix_rotate(self.ptr(), radians)
+
+    // Replace this matrix with its inverse. Answers a status, because a matrix that squashes the
+    // plane onto a line has none — that is `STATUS_INVALID_MATRIX`, and this is one of the few
+    // places in cairo where a failure is returned rather than recorded.
+    invert(*self) -> Status = Status(externs.matrix_invert(self.ptr()))
+
+    // Transform a point, and transform a distance. A distance ignores the translation, which is the
+    // whole difference between the two: a vector moves under rotation and scaling and not under a
+    // shift of the origin.
+    // These two take `self` rather than `*self` — cairo only reads the matrix, so a caller does not
+    // have to hold one in a `var` to ask it a question. The copy is what the pointer then names.
+    transform_point(self, x: real, y: real) -> (real, real)
+        var m = self
+        var px = x
+        var py = y
+
+        externs.matrix_transform_point(m.ptr(), &px, &py)
+        (px, py)
+    end transform_point
+
+    transform_distance(self, dx: real, dy: real) -> (real, real)
+        var m = self
+        var px = dx
+        var py = dy
+
+        externs.matrix_transform_distance(m.ptr(), &px, &py)
+        (px, py)
+    end transform_distance
+end Matrix
+
+// The identity, which is where a matrix normally starts.
+identity() -> Matrix = Matrix(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+// The two given matrices applied one after the other — `a` first, then `b`.
+multiply(a: Matrix, b: Matrix) -> Matrix
+    var result = identity()
+    var ma = a
+    var mb = b
+
+    externs.matrix_multiply(result.ptr(), ma.ptr(), mb.ptr())
+    result
+end multiply
+
+// What one run of text occupies, in user units.
+//
+// `width` and `height` are the ink — the smallest box the marks fit in — while `x_advance` is where
+// the pen ends up, which is larger, because it includes the space after the last letter. Laying text
+// out uses the advance; drawing a box round it uses the bearings and the size.
+struct TextExtents
+    x_bearing: real
+    y_bearing: real
+    width: real
+    height: real
+    x_advance: real
+    y_advance: real
+
+    ptr(*self) -> *real = ptr_cast(self)
+end TextExtents
+
+// What a *font* occupies, independently of any particular string: the distance above and below the
+// baseline, the recommended line spacing, and the widest any one glyph can be.
+struct FontExtents
+    ascent: real
+    descent: real
+    height: real
+    max_x_advance: real
+    max_y_advance: real
+
+    ptr(*self) -> *real = ptr_cast(self)
+end FontExtents
+
+// One positioned glyph, for the text layer beneath `show_text` — where a shaping engine has already
+// chosen which glyph of the font to draw and where to put it.
+//
+// The layout is `{ unsigned long index; double x; double y; }`, so this crosses to C as an array of
+// itself rather than as a run of doubles.
+struct Glyph
+    index: usize
+    x: real
+    y: real
+
+// An empty pair of extents, to be written into.
+text_extents() -> TextExtents = TextExtents(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+font_extents() -> FontExtents = FontExtents(0.0, 0.0, 0.0, 0.0, 0.0)

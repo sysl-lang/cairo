@@ -1,0 +1,284 @@
+// Cairo for sysl — 2D vector graphics: paths, filling, stroking, dashing, gradients, clipping,
+// transforms and text, rendered into memory or straight into a PDF, an SVG or a PostScript file.
+//
+// ## The shape of it
+//
+// A `Surface` is where drawing lands. A `Context` draws on one. Between `move_to` and `fill` you
+// build a path, and the context carries the state — source, line width, transform, clip, font — that
+// the fill or stroke uses.
+//
+//     var s = image_surface(FORMAT_ARGB32, 200, 200)
+//     var cr = context(s)
+//
+//     cr.set_source_rgb(0.1, 0.2, 0.9)
+//     cr.arc(100.0, 100.0, 60.0, 0.0, 2.0 * pi)
+//     cr.fill()
+//
+//     s.write_png("circle.png")
+//     cr.destroy()
+//     s.destroy()
+//
+// **The same drawing code writes a PDF**, because only the first line changes:
+//
+//     var s = pdf_surface("out.pdf", 612.0, 792.0)
+//
+// That is the reason to reach for cairo over `sh.sysl.plutovg`, which rasterizes and stops there.
+// The other reason is the opposite one: plutovg carries its own C and asks for no system library, so
+// it runs on a microcontroller, and cairo does not. Neither replaces the other.
+//
+// ## Errors live on the object
+//
+// This is cairo's most distinctive convention and the binding keeps it rather than translating it.
+// Almost nothing answers a status: a call that fails **records** the failure on the context or the
+// surface, and every later call on that object does nothing. So a program draws a whole page without
+// checking anything and asks once at the end:
+//
+//     if !cr.status().ok()
+//         print(cr.status())
+//
+// The reason this is safe rather than sloppy is that the failure is **sticky** — it cannot be
+// overwritten by a later success, so the one check at the end sees the first thing that went wrong.
+// Cairo's own documentation calls this "shielding" the caller from error checking.
+//
+// **A constructor never answers null**, for the same reason. When cairo cannot make a surface it
+// answers a static "nil" object whose `status()` says why and which ignores everything asked of it,
+// so there is no `Option` here — ask `ok()` if you want to know.
+//
+// ## Closing things
+//
+// `Surface`, `Context`, `Pattern`, `FontOptions` and `ScaledFont` each hold a C allocation and each
+// has a `destroy`. They are not released for you: sysl has no way to adopt a raw pointer as owned
+// storage, so cairo's own `destroy` is a call the caller makes. Every one of them nulls its handle,
+// so destroying twice is harmless rather than a double free.
+//
+// They are **reference counted** underneath — `reference()` takes a count and `destroy()` drops one
+// — which is how a surface handed to a pattern outlives the variable it was made in.
+
+module sh.sysl.cairo
+
+import sh.sysl.cairo.externs
+import sysl.text.from_cstring
+
+// ## What a call reports when you ask
+//
+// Sticky, and shared by every kind of object: `Context.status`, `Surface.status`, `Pattern.status`
+// and `FontOptions.status` all answer one of these.
+struct Status
+    code: int
+
+    // Nothing has gone wrong. The only value a program normally tests.
+    ok(self) -> bool = self.code == 0
+
+    // Cairo's own sentence for it — "out of memory", "invalid matrix (not invertible)", and so on.
+    // The string is a static one inside the library, so nothing here owns it.
+    message(self) -> string =
+        from_cstring(externs.status_to_string(self.code)).unwrap_or("an error cairo could not describe")
+end Status
+
+// So that `print(s)` and `f"$s%s"` say the sentence rather than the number.
+impl Display for Status
+    display(self, out: *Writer, fmt: FormatSpec) = display_str(self.message(), out, fmt)
+end Status
+
+const STATUS_SUCCESS: int = 0
+const STATUS_NO_MEMORY: int = 1
+const STATUS_INVALID_RESTORE: int = 2
+const STATUS_INVALID_POP_GROUP: int = 3
+const STATUS_NO_CURRENT_POINT: int = 4
+const STATUS_INVALID_MATRIX: int = 5
+const STATUS_INVALID_STATUS: int = 6
+const STATUS_NULL_POINTER: int = 7
+const STATUS_INVALID_STRING: int = 8
+const STATUS_INVALID_PATH_DATA: int = 9
+const STATUS_READ_ERROR: int = 10
+const STATUS_WRITE_ERROR: int = 11
+const STATUS_SURFACE_FINISHED: int = 12
+const STATUS_SURFACE_TYPE_MISMATCH: int = 13
+const STATUS_PATTERN_TYPE_MISMATCH: int = 14
+const STATUS_INVALID_CONTENT: int = 15
+const STATUS_INVALID_FORMAT: int = 16
+const STATUS_INVALID_VISUAL: int = 17
+const STATUS_FILE_NOT_FOUND: int = 18
+const STATUS_INVALID_DASH: int = 19
+
+// ## The enumerations
+//
+// These are the C enum values, and they are `const` rather than sysl `enum`s deliberately: they
+// cross to C as plain `int`, and a sysl enum would need converting at every call. The names are the
+// header's own, shortened by their `CAIRO_` prefix.
+
+// How the pixels of an image surface are laid out. `ARGB32` is premultiplied and is what you want
+// unless you know otherwise; `RGB24` is the same 32 bits with the alpha byte unused.
+const FORMAT_INVALID: int = -1
+const FORMAT_ARGB32: int = 0
+const FORMAT_RGB24: int = 1
+const FORMAT_A8: int = 2
+const FORMAT_A1: int = 3
+const FORMAT_RGB16_565: int = 4
+const FORMAT_RGB30: int = 5
+const FORMAT_RGB96F: int = 6
+const FORMAT_RGBA128F: int = 7
+
+// What a surface holds, where the format is the backend's business rather than the caller's.
+const CONTENT_COLOR: int = 0x1000
+const CONTENT_ALPHA: int = 0x2000
+const CONTENT_COLOR_ALPHA: int = 0x3000
+
+// How the source is combined with what is already there. `OVER` is the default and is ordinary
+// alpha compositing; the second half of the list is the Porter-Duff and blend-mode set.
+const OPERATOR_CLEAR: int = 0
+const OPERATOR_SOURCE: int = 1
+const OPERATOR_OVER: int = 2
+const OPERATOR_IN: int = 3
+const OPERATOR_OUT: int = 4
+const OPERATOR_ATOP: int = 5
+const OPERATOR_DEST: int = 6
+const OPERATOR_DEST_OVER: int = 7
+const OPERATOR_DEST_IN: int = 8
+const OPERATOR_DEST_OUT: int = 9
+const OPERATOR_DEST_ATOP: int = 10
+const OPERATOR_XOR: int = 11
+const OPERATOR_ADD: int = 12
+const OPERATOR_SATURATE: int = 13
+const OPERATOR_MULTIPLY: int = 14
+const OPERATOR_SCREEN: int = 15
+const OPERATOR_OVERLAY: int = 16
+const OPERATOR_DARKEN: int = 17
+const OPERATOR_LIGHTEN: int = 18
+const OPERATOR_COLOR_DODGE: int = 19
+const OPERATOR_COLOR_BURN: int = 20
+const OPERATOR_HARD_LIGHT: int = 21
+const OPERATOR_SOFT_LIGHT: int = 22
+const OPERATOR_DIFFERENCE: int = 23
+const OPERATOR_EXCLUSION: int = 24
+const OPERATOR_HSL_HUE: int = 25
+const OPERATOR_HSL_SATURATION: int = 26
+const OPERATOR_HSL_COLOR: int = 27
+const OPERATOR_HSL_LUMINOSITY: int = 28
+
+const ANTIALIAS_DEFAULT: int = 0
+const ANTIALIAS_NONE: int = 1
+const ANTIALIAS_GRAY: int = 2
+const ANTIALIAS_SUBPIXEL: int = 3
+const ANTIALIAS_FAST: int = 4
+const ANTIALIAS_GOOD: int = 5
+const ANTIALIAS_BEST: int = 6
+
+// How a path decides what is inside it when it crosses itself.
+const FILL_RULE_WINDING: int = 0
+const FILL_RULE_EVEN_ODD: int = 1
+
+// How a stroke ends, and how two segments meet.
+const LINE_CAP_BUTT: int = 0
+const LINE_CAP_ROUND: int = 1
+const LINE_CAP_SQUARE: int = 2
+
+const LINE_JOIN_MITER: int = 0
+const LINE_JOIN_ROUND: int = 1
+const LINE_JOIN_BEVEL: int = 2
+
+const FONT_SLANT_NORMAL: int = 0
+const FONT_SLANT_ITALIC: int = 1
+const FONT_SLANT_OBLIQUE: int = 2
+
+const FONT_WEIGHT_NORMAL: int = 0
+const FONT_WEIGHT_BOLD: int = 1
+
+const SUBPIXEL_ORDER_DEFAULT: int = 0
+const SUBPIXEL_ORDER_RGB: int = 1
+const SUBPIXEL_ORDER_BGR: int = 2
+const SUBPIXEL_ORDER_VRGB: int = 3
+const SUBPIXEL_ORDER_VBGR: int = 4
+
+const HINT_STYLE_DEFAULT: int = 0
+const HINT_STYLE_NONE: int = 1
+const HINT_STYLE_SLIGHT: int = 2
+const HINT_STYLE_MEDIUM: int = 3
+const HINT_STYLE_FULL: int = 4
+
+const HINT_METRICS_DEFAULT: int = 0
+const HINT_METRICS_OFF: int = 1
+const HINT_METRICS_ON: int = 2
+
+// What a pattern does outside the area it was defined for.
+const EXTEND_NONE: int = 0
+const EXTEND_REPEAT: int = 1
+const EXTEND_REFLECT: int = 2
+const EXTEND_PAD: int = 3
+
+// How a surface pattern is sampled when it is scaled.
+const FILTER_FAST: int = 0
+const FILTER_GOOD: int = 1
+const FILTER_BEST: int = 2
+const FILTER_NEAREST: int = 3
+const FILTER_BILINEAR: int = 4
+const FILTER_GAUSSIAN: int = 5
+
+// What `Surface.kind` answers. Only the ones this package can produce are named.
+const SURFACE_TYPE_IMAGE: int = 0
+const SURFACE_TYPE_PDF: int = 1
+const SURFACE_TYPE_PS: int = 2
+const SURFACE_TYPE_SVG: int = 10
+const SURFACE_TYPE_RECORDING: int = 16
+
+const PATTERN_TYPE_SOLID: int = 0
+const PATTERN_TYPE_SURFACE: int = 1
+const PATTERN_TYPE_LINEAR: int = 2
+const PATTERN_TYPE_RADIAL: int = 3
+const PATTERN_TYPE_MESH: int = 4
+const PATTERN_TYPE_RASTER_SOURCE: int = 5
+
+const FONT_TYPE_TOY: int = 0
+const FONT_TYPE_FT: int = 1
+const FONT_TYPE_WIN32: int = 2
+const FONT_TYPE_QUARTZ: int = 3
+const FONT_TYPE_USER: int = 4
+const FONT_TYPE_DWRITE: int = 5
+
+// ### The vector backends' own values
+
+const PDF_VERSION_1_4: int = 0
+const PDF_VERSION_1_5: int = 1
+const PDF_VERSION_1_6: int = 2
+const PDF_VERSION_1_7: int = 3
+
+const PDF_METADATA_TITLE: int = 0
+const PDF_METADATA_AUTHOR: int = 1
+const PDF_METADATA_SUBJECT: int = 2
+const PDF_METADATA_KEYWORDS: int = 3
+const PDF_METADATA_CREATOR: int = 4
+const PDF_METADATA_CREATE_DATE: int = 5
+const PDF_METADATA_MOD_DATE: int = 6
+
+const PDF_OUTLINE_FLAG_OPEN: int = 0x1
+const PDF_OUTLINE_FLAG_BOLD: int = 0x2
+const PDF_OUTLINE_FLAG_ITALIC: int = 0x4
+
+// The parent of a top-level outline entry.
+const PDF_OUTLINE_ROOT: int = 0
+
+const SVG_VERSION_1_1: int = 0
+const SVG_VERSION_1_2: int = 1
+
+// ### Tag names for `Context.tag_begin`
+//
+// Cairo gives two of these a meaning of its own; everything else is a PDF structure tag and is
+// written as its own string.
+
+// A hyperlink, whose attributes name a `uri=` or a `dest=`.
+const TAG_LINK: string = "Link"
+
+// A named destination a link can point at, as `name='top' x=72 y=72`.
+const TAG_DEST: string = "cairo.dest"
+
+// The words cairo puts on `Context.tag_begin` for readable text that is not what the glyphs say.
+const TAG_CONTENT: string = "cairo.content"
+const TAG_CONTENT_REF: string = "cairo.content_ref"
+
+// ## The library itself
+
+// Which cairo this program is linked against, as its own three-part string.
+version() -> string = from_cstring(externs.version_string()).unwrap_or("unknown")
+
+// The same, encoded as `major * 10000 + minor * 100 + micro`, which is what a comparison wants.
+version_number() -> int = externs.version()

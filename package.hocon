@@ -1,0 +1,49 @@
+// Cairo for sysl — 2D vector graphics, bound to https://www.cairographics.org/.
+//
+// There is no `dependencies` block because this binding depends on no other sysl package. What it
+// needs is a C library the machine already has, and `@link("cairo")` in the externs module is where
+// that is said — the same arrangement as `sqlite3` and the SDL3 packages, and the opposite of
+// `plutovg`, `qoi` and `qcbor`, which carry their C with them.
+//
+// This is the block a *consumer* writes to reach this package, and resolution for it is built
+// (`design/packages.md` §§ 3-6): a `sysl build` fetches the coordinate, selects by MVS, checks what
+// arrived against `sysl.sum`, and compiles it as more modules.
+//
+//     dependencies {
+//       cairo { git = "github.com/sysl-lang/cairo", version = "0.1.0" }
+//     }
+//
+// The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
+// tag `v0.1.0` on this repository.
+//
+// Cairo itself has to be installed, and its headers do **not** have to be:
+//
+//     brew install cairo                 # macOS
+//     sudo apt install libcairo2-dev     # Debian / Ubuntu
+//
+// There is no shim, so no C is compiled here and no header is read — only the linker needs to find
+// the library. On a Homebrew machine that is one flag:
+//
+//     sysl build . --link-path /opt/homebrew/lib
+
+package {
+  name    = "cairo"
+  version = "0.1.0"
+}
+
+// Cairo is a hosted library. It opens files — a PNG, a PDF, an SVG — and reaches the C runtime for
+// them, so a freestanding target has nothing for it to run on, and saying so here turns "this will
+// not link" into one clean refusal before anything is compiled.
+//
+// `alloc` is honest rather than defensive: cairo mallocs its surfaces, its paths and its glyph
+// caches, and unlike QOI it has no allocator hook to point somewhere else. `image_surface_for_data`
+// keeps the *pixels* out of the heap, which is the large allocation, but the surface object itself
+// still allocates.
+//
+// A program that needs graphics without either of these wants `sh.sysl.plutovg`, which vendors its
+// C and runs on a microcontroller. That is the real division between the two packages, and it is
+// not about features.
+requires {
+  os    = true
+  alloc = true
+}

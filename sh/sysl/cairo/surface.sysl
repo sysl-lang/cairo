@@ -1,0 +1,316 @@
+// Surfaces — where drawing lands.
+//
+// An **image** surface is pixels in memory. A **PDF**, **SVG** or **PostScript** surface is a file
+// being written, and the drawing calls are the same ones: that is cairo's central idea, and it is
+// why a program that renders a chart to a PNG renders it to a vector page by changing one line.
+//
+// A **recording** surface is neither — it keeps the operations, so the same drawing is replayed into
+// a small PNG and a large one without being described twice.
+
+module sh.sysl.cairo
+
+import sh.sysl.cairo.externs
+import sysl.buf.{Buf, buf}
+import sysl.text.{cstring, from_cstring}
+import sysl.slices.as_ptr
+
+// Where drawing lands. Made by one of the constructors below, and released with `destroy`.
+struct Surface
+    handle: *u8
+
+    // What has gone wrong on this surface, if anything. Sticky: the first failure is the one
+    // reported, and every later call on the surface does nothing.
+    status(self) -> Status = Status(externs.surface_status(self.handle))
+
+    // Whether the surface is usable — the check a constructor's caller makes.
+    ok(self) -> bool = self.status().ok()
+
+    // Which backend this is, as one of the `SURFACE_TYPE_*` values.
+    kind(self) -> int = externs.surface_get_type(self.handle)
+
+    // Whether it holds colour, alpha or both, as a `CONTENT_*` value.
+    content(self) -> int = externs.surface_get_content(self.handle)
+
+    // How many references are outstanding. One, unless something has taken another.
+    reference_count(self) -> uint = externs.surface_get_reference_count(self.handle)
+
+    // Take a reference, so this surface outlives the handle it was made from. The result must be
+    // destroyed in its turn — the two calls are what balance.
+    reference(self) -> Surface = Surface(externs.surface_reference(self.handle))
+
+    // Finish the surface: no more drawing is accepted, and a file backend flushes and closes. A PDF
+    // is not complete until this has happened or the surface has been destroyed.
+    finish(*self) = externs.surface_finish(self.handle)
+
+    // Make sure cairo has written everything it is holding, before the pixels are read directly.
+    flush(*self) = externs.surface_flush(self.handle)
+
+    // Tell cairo the pixels were changed behind its back, after writing them directly. The whole
+    // surface, or one rectangle of it.
+    mark_dirty(*self) = externs.surface_mark_dirty(self.handle)
+    mark_dirty_rect(*self, x: int, y: int, width: int, height: int) =
+        externs.surface_mark_dirty_rectangle(self.handle, x, y, width, height)
+
+    // Start a new page, on a backend that has pages. `show_page` clears the page as it emits it;
+    // `copy_page` keeps its contents for the next one.
+    show_page(*self) = externs.surface_show_page(self.handle)
+    copy_page(*self) = externs.surface_copy_page(self.handle)
+
+    // Shift or scale everything drawn on this surface, in device space. A device scale of 2 is how a
+    // drawing written in points renders at twice the resolution without any coordinate changing.
+    set_device_offset(*self, x: real, y: real) = externs.surface_set_device_offset(self.handle, x, y)
+    set_device_scale(*self, x: real, y: real) = externs.surface_set_device_scale(self.handle, x, y)
+
+    device_offset(self) -> (real, real)
+        var x = 0.0
+        var y = 0.0
+
+        externs.surface_get_device_offset(self.handle, &x, &y)
+        (x, y)
+    end device_offset
+
+    device_scale(self) -> (real, real)
+        var x = 1.0
+        var y = 1.0
+
+        externs.surface_get_device_scale(self.handle, &x, &y)
+        (x, y)
+    end device_scale
+
+    // Another surface of the same kind, which is how an intermediate is made that the backend can
+    // composite efficiently. `similar_image` forces pixels even where this surface has none.
+    similar(self, content: int, width: int, height: int) -> Surface =
+        Surface(externs.surface_create_similar(self.handle, content, width, height))
+
+    similar_image(self, format: int, width: int, height: int) -> Surface =
+        Surface(externs.surface_create_similar_image(self.handle, format, width, height))
+
+    // A window onto a rectangle of this surface, drawing through to the original.
+    sub(self, x: real, y: real, width: real, height: real) -> Surface =
+        Surface(externs.surface_create_for_rectangle(self.handle, x, y, width, height))
+
+    // ---- what only an image surface answers ----
+
+    width(self) -> int = externs.image_surface_get_width(self.handle)
+    height(self) -> int = externs.image_surface_get_height(self.handle)
+
+    // Bytes from the start of one row to the start of the next. Not `width * 4`: cairo pads rows.
+    stride(self) -> int = externs.image_surface_get_stride(self.handle)
+
+    format(self) -> int = externs.image_surface_get_format(self.handle)
+
+    // The pixels themselves, as a slice over cairo's own storage. `flush` first if anything has been
+    // drawn, and `mark_dirty` afterwards if anything here is written.
+    //
+    // **`ARGB32` is premultiplied**, and on a little-endian machine the bytes of a pixel are B, G,
+    // R, A — so opaque red is `0, 0, 255, 255`.
+    data(self) -> []u8
+        val n = usize(externs.image_surface_get_stride(self.handle)) * usize(externs.image_surface_get_height(self.handle))
+
+        externs.image_surface_get_data(self.handle)[0..<n]
+    end data
+
+    // ---- PNG ----
+
+    // Write the surface to a PNG file.
+    write_png(self, filename: string) -> Status
+        var name = cstring(filename)
+
+        Status(externs.surface_write_to_png(self.handle, name.ptr))
+    end write_png
+
+    // Encode the surface as a PNG **into memory**, which is what a program serving an image over a
+    // socket wants and what a test that never touches the filesystem wants.
+    //
+    // Cairo hands each block of the encoded stream to a callback along with an opaque pointer of the
+    // caller's choosing; here that pointer is the buffer being filled.
+    png_bytes(self) -> Result[Buf[u8], Status]
+        var sink: Buf[u8] = buf()
+        val code = externs.surface_write_to_png_stream(self.handle, &png_write, ptr_cast(&sink))
+
+        if code == 0 then Ok(sink) else Err(Status(code))
+    end png_bytes
+
+    // Release one reference. Destroying twice is harmless — the handle is nulled.
+    destroy(*self)
+        if self.handle != null
+            externs.surface_destroy(self.handle)
+            self.handle = null
+end Surface
+
+// The trampoline cairo calls with each block of an encoded PNG. It is an ordinary sysl function
+// whose address is taken; the `closure` is whatever was handed to the stream call, cast back.
+png_write(closure: *u8, data: *u8, length: uint) -> int
+    val sink: *Buf[u8] = ptr_cast(closure)
+
+    for i in 0..<usize(length)
+        sink.push(data[i])
+
+    0
+end png_write
+
+// Where a PNG being decoded from memory has got to.
+struct PngSource
+    data: *u8
+    len: usize
+    pos: usize
+
+// The trampoline cairo calls to pull the next block of a PNG out of memory. Answering anything but
+// zero is `CAIRO_STATUS_READ_ERROR`, which is what a truncated input should produce.
+png_read(closure: *u8, data: *u8, length: uint) -> int
+    val src: *PngSource = ptr_cast(closure)
+    val n = usize(length)
+
+    if src.pos + n > src.len
+        return 10
+
+    for i in 0..<n
+        data[i] = src.data[src.pos + i]
+
+    src.pos += n
+    0
+end png_read
+
+// ## Making one
+
+// Pixels in memory, `width` by `height`, every one of them transparent to start with.
+image_surface(format: int, width: int, height: int) -> Surface =
+    Surface(externs.image_surface_create(format, width, height))
+
+// Pixels the **caller** already owns. Nothing is allocated for them and destroying the surface does
+// not free them, so the buffer must outlive it. `stride_for_width` says how long a row must be.
+image_surface_for_data(pixels: []u8, format: int, width: int, height: int, stride: int) -> Surface =
+    Surface(externs.image_surface_create_for_data(as_ptr(pixels), format, width, height, stride))
+
+// The row length cairo requires for a format and a width, which is `width * bytes` rounded up to
+// whatever alignment the machine wants. Answers a negative number for a format it does not know.
+stride_for_width(format: int, width: int) -> int = externs.format_stride_for_width(format, width)
+
+// Read a PNG file into a new image surface.
+png_surface(filename: string) -> Surface
+    var name = cstring(filename)
+
+    Surface(externs.image_surface_create_from_png(name.ptr))
+end png_surface
+
+// Read a PNG that is already in memory.
+png_surface_from_bytes(bytes: []const u8) -> Surface
+    var src = PngSource(as_ptr(bytes), bytes.len, 0)
+
+    Surface(externs.image_surface_create_from_png_stream(&png_read, ptr_cast(&src)))
+end png_surface_from_bytes
+
+// A PDF being written to `filename`, whose page is `width` by `height` **in points** — 72 to the
+// inch, so US Letter is 612 by 792 and A4 is 595 by 842.
+pdf_surface(filename: string, width: real, height: real) -> Surface
+    var name = cstring(filename)
+
+    Surface(externs.pdf_surface_create(name.ptr, width, height))
+end pdf_surface
+
+// An SVG being written to `filename`, in points.
+svg_surface(filename: string, width: real, height: real) -> Surface
+    var name = cstring(filename)
+
+    Surface(externs.svg_surface_create(name.ptr, width, height))
+end svg_surface
+
+// A PostScript file being written to `filename`, in points.
+ps_surface(filename: string, width: real, height: real) -> Surface
+    var name = cstring(filename)
+
+    Surface(externs.ps_surface_create(name.ptr, width, height))
+end ps_surface
+
+// A surface that records what is drawn rather than drawing it, to be replayed onto another surface
+// as a pattern. Unbounded, so it may be drawn on anywhere.
+recording_surface(content: int) -> Surface = Surface(externs.recording_surface_create(content, null))
+
+// The same, bounded to a rectangle, which is what lets `ink_extents` be meaningful.
+recording_surface_bounded(content: int, x: real, y: real, width: real, height: real) -> Surface
+    var extents = [x, y, width, height]
+    val e = extents[0..<4]
+
+    Surface(externs.recording_surface_create(content, as_ptr(e)))
+end recording_surface_bounded
+
+// The smallest rectangle holding everything drawn on a recording surface, as `(x, y, width, height)`.
+ink_extents(s: Surface) -> (real, real, real, real)
+    var x = 0.0
+    var y = 0.0
+    var w = 0.0
+    var h = 0.0
+
+    externs.recording_surface_ink_extents(s.handle, &x, &y, &w, &h)
+    (x, y, w, h)
+end ink_extents
+
+// ## The vector backends' own settings
+//
+// These are free functions rather than methods because each applies to one kind of surface only,
+// and cairo records `STATUS_SURFACE_TYPE_MISMATCH` on the surface if it is given the wrong one.
+
+// Hold the PDF to a version older readers understand, as one of the `PDF_VERSION_*` values.
+pdf_restrict_to_version(s: Surface, version: int) = externs.pdf_surface_restrict_to_version(s.handle, version)
+
+// The name of a PDF version, as `"PDF 1.7"`.
+pdf_version_string(version: int) -> string =
+    from_cstring(externs.pdf_version_to_string(version)).unwrap_or("unknown")
+
+// Change the page size, before anything is drawn on the new page.
+pdf_set_size(s: Surface, width: real, height: real) = externs.pdf_surface_set_size(s.handle, width, height)
+
+// Set one of the document's standard metadata fields, as a `PDF_METADATA_*` value.
+pdf_set_metadata(s: Surface, metadata: int, value: string)
+    var v = cstring(value)
+
+    externs.pdf_surface_set_metadata(s.handle, metadata, v.ptr)
+end pdf_set_metadata
+
+// Set a field of your own, which lands in the document information dictionary.
+pdf_set_custom_metadata(s: Surface, name: string, value: string)
+    var n = cstring(name)
+    var v = cstring(value)
+
+    externs.pdf_surface_set_custom_metadata(s.handle, n.ptr, v.ptr)
+end pdf_set_custom_metadata
+
+// What the viewer shows for the current page instead of its number — `"Cover"`, or `"iv"`.
+pdf_set_page_label(s: Surface, label: string)
+    var l = cstring(label)
+
+    externs.pdf_surface_set_page_label(s.handle, l.ptr)
+end pdf_set_page_label
+
+// Embed a thumbnail of each page from here on. Zero by zero turns it off again.
+pdf_set_thumbnail_size(s: Surface, width: int, height: int) =
+    externs.pdf_surface_set_thumbnail_size(s.handle, width, height)
+
+// Add an entry to the viewer's bookmark sidebar, under `parent` — `PDF_OUTLINE_ROOT` for a top-level
+// one. `link` is a destination in the same words a `TAG_LINK` takes, as `dest='top'`. Answers the id
+// of the new entry, which is what a child entry names as its parent.
+pdf_add_outline(s: Surface, parent: int, name: string, link: string, flags: int) -> int
+    var n = cstring(name)
+    var l = cstring(link)
+
+    externs.pdf_surface_add_outline(s.handle, parent, n.ptr, l.ptr, flags)
+end pdf_add_outline
+
+// Hold the SVG to a version, as one of the `SVG_VERSION_*` values.
+svg_restrict_to_version(s: Surface, version: int) = externs.svg_surface_restrict_to_version(s.handle, version)
+
+svg_version_string(version: int) -> string =
+    from_cstring(externs.svg_version_to_string(version)).unwrap_or("unknown")
+
+// Change the PostScript page size, before anything is drawn on the new page.
+ps_set_size(s: Surface, width: real, height: real) = externs.ps_surface_set_size(s.handle, width, height)
+
+// Emit Encapsulated PostScript rather than a printable document. Must be set before drawing.
+ps_set_eps(s: Surface, eps: bool) = externs.ps_surface_set_eps(s.handle, eps)
+
+// Add a Document Structuring Convention comment, such as `"%%Title: my drawing"`.
+ps_dsc_comment(s: Surface, comment: string)
+    var c = cstring(comment)
+
+    externs.ps_surface_dsc_comment(s.handle, c.ptr)
+end ps_dsc_comment

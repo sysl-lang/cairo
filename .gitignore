@@ -1,0 +1,5 @@
+/cairo
+*.png
+*.pdf
+*.svg
+*.ps

@@ -1,0 +1,958 @@
+module sh.sysl.cairo
+@tests
+
+import sysl.buf.{Buf, buf}
+import sysl.fs.{is_file, remove_file, read_bytes}
+import sysl.math.pi
+
+// Every one of these draws for real and then reads the result back, because a graphics binding that
+// only checks return codes is checking that C was called rather than that the right thing happened.
+// The image surface makes that cheap: the pixels are in memory, so a fill is asserted by looking at
+// one.
+//
+// **Pixels of an `ARGB32` surface are premultiplied and little-endian**, so the bytes of one are B,
+// G, R, A — opaque red is `0, 0, 255, 255`, and that byte order is the thing to check first when an
+// assertion here looks impossible.
+
+// The pixel at `(x, y)` of an image surface, as `(r, g, b, a)`.
+pixel(s: Surface, x: int, y: int) -> (u8, u8, u8, u8)
+    val stride = usize(s.stride())
+    val d = s.data()
+    val i = usize(y) * stride + usize(x) * 4
+
+    (d[i + 2], d[i + 1], d[i], d[i + 3])
+end pixel
+
+@test
+the_library_says_which_version_it_is()
+    val v = version()
+
+    assert(v.len > 0, "cairo answered a version string")
+    assert(version_number() >= 11000, "and a number no older than 1.10")
+end the_library_says_which_version_it_is
+
+@test
+a_fill_puts_the_source_colour_in_the_pixels()
+    var s = image_surface(FORMAT_ARGB32, 32, 32)
+
+    assert(s.ok(), "the surface was created")
+    assert_eq(s.width(), 32, "it is as wide as it was asked to be")
+    assert_eq(s.height(), 32, "and as tall")
+    assert_eq(s.format(), FORMAT_ARGB32, "in the format it was asked for")
+    assert_eq(s.kind(), SURFACE_TYPE_IMAGE, "an image surface knows it is one")
+
+    var cr = context(s)
+
+    cr.set_source_rgb(1.0, 0.0, 0.0)
+    cr.rectangle(0.0, 0.0, 16.0, 16.0)
+    cr.fill()
+    s.flush()
+
+    val (r, g, b, a) = pixel(s, 4, 4)
+
+    assert_eq(r, 255u8, "the filled corner is red")
+    assert_eq(g, 0u8, "with no green")
+    assert_eq(b, 0u8, "and no blue")
+    assert_eq(a, 255u8, "and it is opaque")
+
+    val (_, _, _, outside) = pixel(s, 24, 24)
+
+    assert_eq(outside, 0u8, "outside the rectangle nothing was painted")
+    assert(cr.ok(), "and nothing went wrong")
+
+    cr.destroy()
+    s.destroy()
+end a_fill_puts_the_source_colour_in_the_pixels
+
+@test
+a_status_is_sticky_and_says_what_went_wrong()
+    var s = image_surface(FORMAT_ARGB32, 8, 8)
+    var cr = context(s)
+
+    // A `restore` with no matching `save` is the cheapest way to put a context into an error state.
+    cr.restore()
+
+    assert(!cr.ok(), "the context is no longer usable")
+    assert_eq(cr.status().code, STATUS_INVALID_RESTORE, "and says which mistake it was")
+    assert_eq(cr.status().message(), "cairo_restore() without matching cairo_save()", "in cairo's own words")
+
+    // The failure shields everything afterwards: a perfectly good call changes nothing.
+    cr.set_source_rgb(1.0, 1.0, 1.0)
+    cr.paint()
+    s.flush()
+
+    val (_, _, _, a) = pixel(s, 4, 4)
+
+    assert_eq(a, 0u8, "the paint after the error did not happen")
+    assert_eq(cr.status().code, STATUS_INVALID_RESTORE, "and the first error is still the one reported")
+
+    cr.destroy()
+    s.destroy()
+end a_status_is_sticky_and_says_what_went_wrong
+
+@test
+destroying_twice_is_harmless()
+    var s = image_surface(FORMAT_ARGB32, 8, 8)
+    var cr = context(s)
+
+    assert_eq(cr.reference_count(), 1, "a fresh context holds one reference")
+
+    cr.destroy()
+    cr.destroy()
+    s.destroy()
+    s.destroy()
+
+    assert(true, "neither second call reached cairo")
+end destroying_twice_is_harmless
+
+@test
+a_reference_outlives_the_handle_it_came_from()
+    var s = image_surface(FORMAT_ARGB32, 8, 8)
+    var second = s.reference()
+
+    assert_eq(s.reference_count(), 2, "two references are outstanding")
+
+    s.destroy()
+
+    assert(second.ok(), "the surface is still alive through the other one")
+    assert_eq(second.reference_count(), 1, "and only one reference is left")
+
+    second.destroy()
+end a_reference_outlives_the_handle_it_came_from
+
+@test
+the_graphics_state_is_saved_and_restored()
+    var s = image_surface(FORMAT_ARGB32, 8, 8)
+    var cr = context(s)
+
+    cr.set_line_width(4.0)
+    cr.save()
+    cr.set_line_width(9.0)
+
+    assert_eq(cr.line_width(), 9.0, "the inner setting is in force")
+
+    cr.restore()
+
+    assert_eq(cr.line_width(), 4.0, "and the outer one came back")
+
+    cr.set_line_cap(LINE_CAP_ROUND)
+    cr.set_line_join(LINE_JOIN_BEVEL)
+    cr.set_fill_rule(FILL_RULE_EVEN_ODD)
+    cr.set_operator(OPERATOR_ADD)
+    cr.set_miter_limit(3.0)
+    cr.set_tolerance(0.25)
+    cr.set_antialias(ANTIALIAS_NONE)
+
+    assert_eq(cr.line_cap(), LINE_CAP_ROUND, "the cap reads back")
+    assert_eq(cr.line_join(), LINE_JOIN_BEVEL, "the join reads back")
+    assert_eq(cr.fill_rule(), FILL_RULE_EVEN_ODD, "the fill rule reads back")
+    assert_eq(cr.operator(), OPERATOR_ADD, "the operator reads back")
+    assert_eq(cr.miter_limit(), 3.0, "the miter limit reads back")
+    assert_eq(cr.tolerance(), 0.25, "the tolerance reads back")
+    assert_eq(cr.antialias(), ANTIALIAS_NONE, "the antialias mode reads back")
+
+    cr.destroy()
+    s.destroy()
+end the_graphics_state_is_saved_and_restored
+
+@test
+a_dash_pattern_is_copied_out_of_the_slice()
+    var s = image_surface(FORMAT_ARGB32, 8, 8)
+    var cr = context(s)
+    val dashes = [4.0, 2.0, 1.0]
+
+    cr.set_dash(dashes[0..<3], 0.0)
+
+    assert_eq(cr.dash_count(), 3, "cairo read three lengths out of the slice")
+
+    cr.set_dash(dashes[0..<0], 0.0)
+
+    assert_eq(cr.dash_count(), 0, "and an empty slice draws solid again")
+
+    cr.destroy()
+    s.destroy()
+end a_dash_pattern_is_copied_out_of_the_slice
+
+@test
+a_path_reports_where_it_is_and_what_it_covers()
+    var s = image_surface(FORMAT_ARGB32, 64, 64)
+    var cr = context(s)
+
+    assert(!cr.has_current_point(), "a fresh path has no current point")
+
+    cr.move_to(10.0, 20.0)
+
+    assert(cr.has_current_point(), "and one appears when the pen is put down")
+
+    val (x, y) = cr.current_point()
+
+    assert_eq(x, 10.0, "the point is where it was moved to")
+    assert_eq(y, 20.0, "in both axes")
+
+    cr.rel_line_to(20.0, 10.0)
+
+    val (px, py) = cr.current_point()
+
+    assert_eq(px, 30.0, "a relative move is relative to it")
+    assert_eq(py, 30.0, "in both axes")
+
+    val (x1, y1, x2, y2) = cr.path_extents()
+
+    assert_eq(x1, 10.0, "the path's box starts where it does")
+    assert_eq(y1, 20.0, "in both axes")
+    assert_eq(x2, 30.0, "and ends where it ends")
+    assert_eq(y2, 30.0, "in both axes")
+
+    cr.new_path()
+
+    assert(!cr.has_current_point(), "and a new path discards all of it")
+
+    cr.destroy()
+    s.destroy()
+end a_path_reports_where_it_is_and_what_it_covers
+
+@test
+a_stroke_covers_more_ground_than_a_fill()
+    var s = image_surface(FORMAT_ARGB32, 64, 64)
+    var cr = context(s)
+
+    cr.set_line_width(10.0)
+    cr.rectangle(20.0, 20.0, 20.0, 20.0)
+
+    val (fx1, fy1, _, _) = cr.fill_extents()
+    val (sx1, sy1, _, _) = cr.stroke_extents()
+
+    assert_eq(fx1, 20.0, "the fill reaches the edge of the rectangle")
+    assert_eq(sx1, 15.0, "and the stroke half a line width beyond it")
+    assert_eq(fy1, 20.0, "in both axes for the fill")
+    assert_eq(sy1, 15.0, "and in both for the stroke")
+
+    assert(cr.in_fill(30.0, 30.0), "the middle is inside the fill")
+    assert(!cr.in_fill(5.0, 5.0), "and the far corner is not")
+    assert(cr.in_stroke(20.0, 30.0), "the edge is on the stroke")
+    assert(!cr.in_stroke(30.0, 30.0), "and the middle is not")
+
+    cr.destroy()
+    s.destroy()
+end a_stroke_covers_more_ground_than_a_fill
+
+@test
+a_clip_keeps_paint_out()
+    var s = image_surface(FORMAT_ARGB32, 32, 32)
+    var cr = context(s)
+
+    cr.rectangle(0.0, 0.0, 16.0, 16.0)
+    cr.clip()
+
+    val (_, _, x2, y2) = cr.clip_extents()
+
+    assert_eq(x2, 16.0, "the clip is as wide as the path was")
+    assert_eq(y2, 16.0, "and as tall")
+    assert(cr.in_clip(8.0, 8.0), "a point inside it is inside")
+    assert(!cr.in_clip(24.0, 24.0), "and one outside is not")
+
+    cr.set_source_rgb(0.0, 1.0, 0.0)
+    cr.paint()
+    s.flush()
+
+    val (_, inside, _, _) = pixel(s, 8, 8)
+    val (_, _, _, outside) = pixel(s, 24, 24)
+
+    assert_eq(inside, 255u8, "paint reached inside the clip")
+    assert_eq(outside, 0u8, "and did not reach outside it")
+
+    cr.reset_clip()
+
+    val (_, _, wide, _) = cr.clip_extents()
+
+    assert_eq(wide, 32.0, "resetting the clip gives the whole surface back")
+
+    cr.destroy()
+    s.destroy()
+end a_clip_keeps_paint_out
+
+@test
+the_transform_moves_user_space()
+    var s = image_surface(FORMAT_ARGB32, 32, 32)
+    var cr = context(s)
+
+    cr.translate(10.0, 5.0)
+    cr.scale(2.0, 4.0)
+
+    val (dx, dy) = cr.user_to_device(1.0, 1.0)
+
+    assert_eq(dx, 12.0, "a point picks up the scale and then the translation")
+    assert_eq(dy, 9.0, "in both axes")
+
+    val (vx, vy) = cr.user_to_device_distance(1.0, 1.0)
+
+    assert_eq(vx, 2.0, "a distance picks up only the scale")
+    assert_eq(vy, 4.0, "in both axes")
+
+    val (ux, uy) = cr.device_to_user(12.0, 9.0)
+
+    assert_eq(ux, 1.0, "and the inverse comes back to where it started")
+    assert_eq(uy, 1.0, "in both axes")
+
+    val m = cr.matrix()
+
+    assert_eq(m.xx, 2.0, "the matrix says the same thing")
+    assert_eq(m.yy, 4.0, "in both axes")
+    assert_eq(m.x0, 10.0, "including the translation")
+    assert_eq(m.y0, 5.0, "in both axes")
+
+    cr.identity_matrix()
+
+    val (ix, _) = cr.user_to_device(1.0, 1.0)
+
+    assert_eq(ix, 1.0, "and it can be thrown away again")
+
+    cr.destroy()
+    s.destroy()
+end the_transform_moves_user_space
+
+@test
+a_matrix_is_the_callers_own_storage()
+    var m = identity()
+
+    assert_eq(m.xx, 1.0, "the identity is the identity")
+    assert_eq(m.x0, 0.0, "with no translation")
+
+    m.init_scale(3.0, 5.0)
+
+    assert_eq(m.xx, 3.0, "cairo wrote through the pointer into the struct")
+    assert_eq(m.yy, 5.0, "in both axes, so the layout agrees with C's")
+
+    val (x, y) = m.transform_point(2.0, 2.0)
+
+    assert_eq(x, 6.0, "and the same storage transforms a point")
+    assert_eq(y, 10.0, "in both axes")
+
+    val st = m.invert()
+
+    assert(st.ok(), "a scaling matrix inverts")
+    assert_eq(m.xx, 1.0 / 3.0, "into the reciprocal")
+
+    var flat = Matrix(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    assert_eq(flat.invert().code, STATUS_INVALID_MATRIX, "and a degenerate one does not")
+
+    var t = identity()
+
+    t.init_translate(4.0, 6.0)
+
+    var sc = identity()
+
+    sc.init_scale(2.0, 2.0)
+
+    val both = multiply(sc, t)
+    val (bx, by) = both.transform_point(1.0, 1.0)
+
+    assert_eq(bx, 6.0, "a product applies the left one first")
+    assert_eq(by, 8.0, "in both axes")
+end a_matrix_is_the_callers_own_storage
+
+@test
+a_gradient_is_different_at_its_two_ends()
+    var s = image_surface(FORMAT_ARGB32, 64, 8)
+    var cr = context(s)
+    var g = linear_pattern(0.0, 0.0, 64.0, 0.0)
+
+    assert(g.ok(), "the gradient was created")
+    assert_eq(g.kind(), PATTERN_TYPE_LINEAR, "and knows which kind it is")
+
+    g.add_color_stop_rgb(0.0, 1.0, 0.0, 0.0)
+    g.add_color_stop_rgb(1.0, 0.0, 0.0, 1.0)
+
+    assert_eq(g.color_stop_count().expect("a gradient counts its stops"), 2, "both stops were added")
+
+    g.set_extend(EXTEND_REFLECT)
+
+    assert_eq(g.extend(), EXTEND_REFLECT, "the extend mode reads back")
+
+    cr.set_source(g)
+    cr.paint()
+    s.flush()
+
+    val (lr, _, lb, _) = pixel(s, 1, 4)
+    val (rr, _, rb, _) = pixel(s, 62, 4)
+
+    assert(lr > 200u8, "the left end is red")
+    assert(lb < 60u8, "and not blue")
+    assert(rb > 200u8, "the right end is blue")
+    assert(rr < 60u8, "and not red")
+
+    g.destroy()
+    cr.destroy()
+    s.destroy()
+end a_gradient_is_different_at_its_two_ends
+
+@test
+a_solid_pattern_says_it_is_solid()
+    var p = solid_pattern_rgba(0.0, 1.0, 0.0, 0.5)
+
+    assert(p.ok(), "the pattern was created")
+    assert_eq(p.kind(), PATTERN_TYPE_SOLID, "and knows which kind it is")
+    assert(p.color_stop_count().is_none(), "a solid colour has no stops to count")
+
+    var m = identity()
+
+    m.init_scale(2.0, 2.0)
+    p.set_matrix(m)
+
+    assert_eq(p.matrix().xx, 2.0, "a pattern's own matrix reads back")
+
+    p.destroy()
+end a_solid_pattern_says_it_is_solid
+
+@test
+one_surface_is_painted_onto_another()
+    var stamp = image_surface(FORMAT_ARGB32, 8, 8)
+    var sc = context(stamp)
+
+    sc.set_source_rgb(0.0, 1.0, 0.0)
+    sc.paint()
+    sc.destroy()
+
+    var page = image_surface(FORMAT_ARGB32, 32, 32)
+    var cr = context(page)
+
+    cr.set_source_surface(stamp, 16.0, 16.0)
+    cr.paint()
+    page.flush()
+
+    val (_, on, _, _) = pixel(page, 20, 20)
+    val (_, _, _, off) = pixel(page, 4, 4)
+
+    assert_eq(on, 255u8, "the stamp landed where it was placed")
+    assert_eq(off, 0u8, "and nowhere else")
+
+    var p = surface_pattern(stamp)
+
+    assert_eq(p.kind(), PATTERN_TYPE_SURFACE, "a surface makes a surface pattern")
+    p.set_filter(FILTER_NEAREST)
+    assert_eq(p.filter(), FILTER_NEAREST, "whose filter reads back")
+
+    p.destroy()
+    cr.destroy()
+    page.destroy()
+    stamp.destroy()
+end one_surface_is_painted_onto_another
+
+@test
+a_group_is_given_one_opacity()
+    var s = image_surface(FORMAT_ARGB32, 16, 16)
+    var cr = context(s)
+
+    cr.push_group()
+    cr.set_source_rgb(1.0, 0.0, 0.0)
+    cr.paint()
+
+    var g = cr.pop_group()
+
+    assert(g.ok(), "the group came back as a pattern")
+    assert_eq(g.kind(), PATTERN_TYPE_SURFACE, "over the surface it recorded onto")
+
+    cr.set_source(g)
+    cr.paint_with_alpha(0.5)
+    s.flush()
+
+    val (r, _, _, a) = pixel(s, 8, 8)
+
+    assert(a > 100u8 && a < 160u8, "the whole group came out half transparent")
+    assert(r > 100u8 && r < 160u8, "and premultiplied red halved with it")
+
+    g.destroy()
+    cr.destroy()
+    s.destroy()
+end a_group_is_given_one_opacity
+
+@test
+text_measures_and_draws()
+    var s = image_surface(FORMAT_ARGB32, 200, 60)
+    var cr = context(s)
+
+    cr.select_font_face("serif", FONT_SLANT_NORMAL, FONT_WEIGHT_BOLD)
+    cr.set_font_size(30.0)
+
+    val fe = cr.font_extents()
+
+    assert(fe.ascent > 0.0, "the font rises above the baseline")
+    assert(fe.descent > 0.0, "and falls below it")
+    assert(fe.height >= fe.ascent, "and its line spacing is at least its ascent")
+
+    val te = cr.text_extents("joy")
+
+    assert(te.width > 0.0, "the text measured wider than nothing")
+    assert(te.height > 0.0, "and taller")
+    assert(te.x_advance > 0.0, "and the pen moves along")
+
+    val wide = cr.text_extents("joyjoyjoy")
+
+    assert(wide.width > te.width, "three times the text is wider than once")
+
+    // The advance is what a layout adds up, and it does add up: three copies of a string advance
+    // three times as far, to within the rounding hinting does. The *ink* does not, because the
+    // bearings at the two ends are counted once rather than three times.
+    val three = te.x_advance * 3.0
+
+    assert(wide.x_advance > three - 2.0 && wide.x_advance < three + 2.0, "and advances three times as far")
+
+    cr.set_source_rgb(0.0, 0.0, 0.0)
+    cr.move_to(10.0, 40.0)
+    cr.show_text("joy")
+    s.flush()
+
+    // Somewhere in the box the text was drawn in there is ink. Which pixel is the font's business,
+    // so the assertion is over the box rather than at a coordinate.
+    var inked = false
+
+    for y in 10..<50
+        for x in 10..<100
+            val (_, _, _, a) = pixel(s, x, y)
+
+            if a > 0u8 then inked = true
+
+    assert(inked, "something was actually drawn")
+    assert(cr.ok(), "and nothing went wrong doing it")
+
+    cr.destroy()
+    s.destroy()
+end text_measures_and_draws
+
+@test
+a_scaled_font_measures_without_a_context()
+    var s = image_surface(FORMAT_ARGB32, 8, 8)
+    var cr = context(s)
+
+    cr.select_font_face("serif", FONT_SLANT_ITALIC, FONT_WEIGHT_NORMAL)
+    cr.set_font_size(20.0)
+
+    var face = cr.font_face().reference()
+
+    assert(face.ok(), "the context had a face to hand back")
+    assert_eq(face.kind(), FONT_TYPE_TOY, "chosen by the toy interface")
+
+    var opts = font_options()
+
+    assert(opts.ok(), "a fresh set of options is usable")
+    opts.set_hint_style(HINT_STYLE_NONE)
+    opts.set_hint_metrics(HINT_METRICS_OFF)
+    opts.set_antialias(ANTIALIAS_GRAY)
+
+    assert_eq(opts.hint_style(), HINT_STYLE_NONE, "the hint style reads back")
+    assert_eq(opts.hint_metrics(), HINT_METRICS_OFF, "the metrics setting reads back")
+    assert_eq(opts.antialias(), ANTIALIAS_GRAY, "the antialias mode reads back")
+
+    var copy = opts.copy()
+
+    assert(copy.equal(opts), "a copy renders identically")
+    assert_eq(copy.hash(), opts.hash(), "and hashes the same")
+
+    var size = identity()
+
+    size.init_scale(20.0, 20.0)
+
+    var sf = scaled_font(face, size, identity(), opts)
+
+    assert(sf.ok(), "the scaled font was made")
+
+    val te = sf.text_extents("joy")
+
+    assert(te.width > 0.0, "and measures text with no context involved")
+
+    val fe = sf.extents()
+
+    assert(fe.ascent > 0.0, "and reports the font's own metrics")
+
+    sf.destroy()
+    copy.destroy()
+    opts.destroy()
+    face.destroy()
+    cr.destroy()
+    s.destroy()
+end a_scaled_font_measures_without_a_context
+
+@test
+glyphs_are_drawn_by_index()
+    var s = image_surface(FORMAT_ARGB32, 64, 64)
+    var cr = context(s)
+
+    cr.select_font_face("serif", FONT_SLANT_NORMAL, FONT_WEIGHT_NORMAL)
+    cr.set_font_size(24.0)
+
+    val glyphs = [Glyph(40, 10.0, 40.0), Glyph(41, 30.0, 40.0)]
+    val g = glyphs[0..<2]
+    val te = cr.glyph_extents(g)
+
+    assert(te.x_advance > 0.0, "two glyphs advance the pen")
+
+    cr.set_source_rgb(0.0, 0.0, 0.0)
+    cr.show_glyphs(g)
+
+    assert(cr.ok(), "and cairo accepted the array as it lays one out")
+
+    cr.destroy()
+    s.destroy()
+end glyphs_are_drawn_by_index
+
+@test
+a_png_survives_a_round_trip_through_memory()
+    var s = image_surface(FORMAT_ARGB32, 16, 16)
+    var cr = context(s)
+
+    cr.set_source_rgb(0.0, 0.0, 1.0)
+    cr.paint()
+    cr.destroy()
+
+    val bytes = s.png_bytes().expect("the surface encoded")
+
+    assert(bytes.len() > 8, "a PNG is at least its signature")
+    assert_eq(bytes[1], 80u8, "and the signature says PNG")
+    assert_eq(bytes[2], 78u8, "in both of the letters checked")
+
+    var back = png_surface_from_bytes(bytes.view())
+
+    assert(back.ok(), "and it decodes again")
+    assert_eq(back.width(), 16, "at the size it went in")
+
+    val (_, _, b, a) = pixel(back, 8, 8)
+
+    assert_eq(b, 255u8, "with the same blue in it")
+    assert_eq(a, 255u8, "and still opaque")
+
+    back.destroy()
+    s.destroy()
+end a_png_survives_a_round_trip_through_memory
+
+@test
+a_png_is_written_to_a_file_and_read_back()
+    val path = "cairo-test-roundtrip.png"
+    var s = image_surface(FORMAT_ARGB32, 16, 16)
+    var cr = context(s)
+
+    cr.set_source_rgb(0.0, 1.0, 0.0)
+    cr.paint()
+    cr.destroy()
+
+    assert(s.write_png(path).ok(), "the PNG was written")
+    assert(is_file(path), "and the file is there")
+
+    var back = png_surface(path)
+
+    assert(back.ok(), "it reads back as a surface")
+
+    val (_, g, _, _) = pixel(back, 8, 8)
+
+    assert_eq(g, 255u8, "with the colour that went into it")
+
+    back.destroy()
+    s.destroy()
+    remove_file(path).expect("the test cleaned up after itself")
+end a_png_is_written_to_a_file_and_read_back
+
+@test
+the_same_drawing_goes_to_a_pdf()
+    val path = "cairo-test-page.pdf"
+    var s = pdf_surface(path, 612.0, 792.0)
+
+    assert(s.ok(), "the PDF surface was created")
+    assert_eq(s.kind(), SURFACE_TYPE_PDF, "and knows which backend it is")
+
+    pdf_set_metadata(s, PDF_METADATA_TITLE, "a test page")
+    pdf_set_metadata(s, PDF_METADATA_AUTHOR, "sh.sysl.cairo")
+    pdf_set_custom_metadata(s, "Purpose", "proving the binding")
+    pdf_set_page_label(s, "Cover")
+    pdf_restrict_to_version(s, PDF_VERSION_1_7)
+
+    assert_eq(pdf_version_string(PDF_VERSION_1_7), "PDF 1.7", "a version has a name")
+
+    var cr = context(s)
+
+    cr.tag_begin("Document", "")
+    cr.tag_begin(TAG_DEST, "name='top' x=72 y=72")
+    cr.tag_end(TAG_DEST)
+
+    cr.select_font_face("serif", FONT_SLANT_NORMAL, FONT_WEIGHT_BOLD)
+    cr.set_font_size(24.0)
+    cr.move_to(72.0, 100.0)
+    cr.show_text("Cairo from sysl")
+
+    cr.tag_begin(TAG_LINK, "uri='https://sysl.sh'")
+    cr.set_source_rgb(0.0, 0.0, 0.8)
+    cr.set_font_size(12.0)
+    cr.move_to(72.0, 140.0)
+    cr.show_text("sysl.sh")
+    cr.tag_end(TAG_LINK)
+
+    cr.show_page()
+
+    cr.tag_begin(TAG_LINK, "dest='top'")
+    cr.move_to(72.0, 100.0)
+    cr.show_text("Back to the top")
+    cr.tag_end(TAG_LINK)
+    cr.tag_end("Document")
+
+    val id = pdf_add_outline(s, PDF_OUTLINE_ROOT, "Cover", "dest='top'", PDF_OUTLINE_FLAG_OPEN + PDF_OUTLINE_FLAG_BOLD)
+
+    assert(id > 0, "the outline entry was given an id")
+    assert(cr.ok(), "and nothing went wrong writing any of it")
+
+    cr.destroy()
+    s.finish()
+    s.destroy()
+
+    assert(is_file(path), "the file is there")
+
+    val bytes = read_bytes(path).expect("the PDF can be read back")
+
+    assert(bytes.len > 1000, "and it has a document in it")
+    assert_eq(bytes[0], 37u8, "which starts with a per-cent sign")
+    assert_eq(bytes[1], 80u8, "and then a P, so it is a PDF")
+
+    remove_file(path).expect("the test cleaned up after itself")
+end the_same_drawing_goes_to_a_pdf
+
+@test
+the_same_drawing_goes_to_an_svg()
+    val path = "cairo-test-page.svg"
+    var s = svg_surface(path, 100.0, 100.0)
+
+    assert(s.ok(), "the SVG surface was created")
+    assert_eq(s.kind(), SURFACE_TYPE_SVG, "and knows which backend it is")
+    assert_eq(svg_version_string(SVG_VERSION_1_1), "SVG 1.1", "a version has a name")
+
+    var cr = context(s)
+
+    cr.set_source_rgb(1.0, 0.0, 0.0)
+    cr.arc(50.0, 50.0, 40.0, 0.0, 2.0 * pi)
+    cr.fill()
+
+    assert(cr.ok(), "nothing went wrong drawing")
+
+    cr.destroy()
+    s.finish()
+    s.destroy()
+
+    val bytes = read_bytes(path).expect("the SVG can be read back")
+
+    assert(bytes.len > 200, "there is a document in it")
+    assert_eq(bytes[0], 60u8, "which starts with an angle bracket")
+
+    remove_file(path).expect("the test cleaned up after itself")
+end the_same_drawing_goes_to_an_svg
+
+@test
+a_recording_surface_replays_what_it_was_given()
+    var rec = recording_surface_bounded(CONTENT_COLOR_ALPHA, 0.0, 0.0, 100.0, 100.0)
+
+    assert(rec.ok(), "the recording surface was created")
+    assert_eq(rec.kind(), SURFACE_TYPE_RECORDING, "and knows which kind it is")
+
+    var rc = context(rec)
+
+    rc.set_source_rgb(1.0, 0.0, 0.0)
+    rc.rectangle(10.0, 10.0, 30.0, 30.0)
+    rc.fill()
+    rc.destroy()
+
+    val (x, y, w, h) = ink_extents(rec)
+
+    assert_eq(x, 10.0, "the ink starts where the rectangle does")
+    assert_eq(y, 10.0, "in both axes")
+    assert_eq(w, 30.0, "and is as wide as it was")
+    assert_eq(h, 30.0, "and as tall")
+
+    // The point of a recording surface: the same drawing replayed at another scale.
+    var out = image_surface(FORMAT_ARGB32, 50, 50)
+    var cr = context(out)
+
+    cr.scale(0.5, 0.5)
+    cr.set_source_surface(rec, 0.0, 0.0)
+    cr.paint()
+    out.flush()
+
+    val (r, _, _, _) = pixel(out, 12, 12)
+
+    assert_eq(r, 255u8, "and it landed at half size")
+
+    cr.destroy()
+    out.destroy()
+    rec.destroy()
+end a_recording_surface_replays_what_it_was_given
+
+@test
+a_surface_can_borrow_the_callers_pixels()
+    val stride = stride_for_width(FORMAT_ARGB32, 16)
+
+    assert_eq(stride, 64, "a row of sixteen ARGB32 pixels is sixty-four bytes")
+
+    var pixels: [1024]u8 = [0; 1024]
+    var s = image_surface_for_data(pixels[0..<1024], FORMAT_ARGB32, 16, 16, stride)
+
+    assert(s.ok(), "the surface was created over the caller's buffer")
+
+    var cr = context(s)
+
+    cr.set_source_rgb(1.0, 1.0, 0.0)
+    cr.paint()
+    cr.destroy()
+    s.flush()
+    s.destroy()
+
+    // The pixels are still the caller's after the surface is gone, which is the whole point.
+    assert_eq(pixels[0], 0u8, "blue is zero in a yellow pixel")
+    assert_eq(pixels[1], 255u8, "green is full")
+    assert_eq(pixels[2], 255u8, "and so is red")
+    assert_eq(pixels[3], 255u8, "and it is opaque")
+end a_surface_can_borrow_the_callers_pixels
+
+@test
+a_similar_surface_takes_after_its_original()
+    var s = image_surface(FORMAT_ARGB32, 32, 32)
+    var similar = s.similar(CONTENT_COLOR_ALPHA, 16, 16)
+
+    assert(similar.ok(), "a similar surface was made")
+    assert_eq(similar.content(), CONTENT_COLOR_ALPHA, "with the content asked for")
+
+    var sub = s.sub(8.0, 8.0, 16.0, 16.0)
+
+    assert(sub.ok(), "and a window onto part of the original")
+
+    var cr = context(sub)
+
+    cr.set_source_rgb(1.0, 0.0, 1.0)
+    cr.paint()
+    cr.destroy()
+    sub.destroy()
+    s.flush()
+
+    val (r, _, b, _) = pixel(s, 12, 12)
+    val (_, _, _, outside) = pixel(s, 2, 2)
+
+    assert_eq(r, 255u8, "drawing through the window reached the original")
+    assert_eq(b, 255u8, "in both channels")
+    assert_eq(outside, 0u8, "and only within the window")
+
+    similar.destroy()
+    s.destroy()
+end a_similar_surface_takes_after_its_original
+
+@test
+a_device_scale_multiplies_everything_drawn()
+    var s = image_surface(FORMAT_ARGB32, 32, 32)
+
+    s.set_device_scale(2.0, 2.0)
+    s.set_device_offset(1.0, 1.0)
+
+    val (sx, sy) = s.device_scale()
+    val (ox, oy) = s.device_offset()
+
+    assert_eq(sx, 2.0, "the device scale reads back")
+    assert_eq(sy, 2.0, "in both axes")
+    assert_eq(ox, 1.0, "and so does the offset")
+    assert_eq(oy, 1.0, "in both axes")
+
+    var cr = context(s)
+
+    cr.set_source_rgb(1.0, 0.0, 0.0)
+    cr.rectangle(0.0, 0.0, 4.0, 4.0)
+    cr.fill()
+    s.flush()
+
+    // Four user units at a device scale of two, offset by one, covers device pixels 1 through 8.
+    val (inside, _, _, _) = pixel(s, 6, 6)
+    val (_, _, _, outside) = pixel(s, 12, 12)
+
+    assert_eq(inside, 255u8, "the rectangle covered twice its user size")
+    assert_eq(outside, 0u8, "and no more than that")
+
+    cr.destroy()
+    s.destroy()
+end a_device_scale_multiplies_everything_drawn
+
+@test
+a_mask_supplies_the_alpha()
+    var s = image_surface(FORMAT_ARGB32, 32, 32)
+    var cr = context(s)
+
+    var g = linear_pattern(0.0, 0.0, 32.0, 0.0)
+
+    g.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.0)
+    g.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 1.0)
+
+    cr.set_source_rgb(1.0, 0.0, 0.0)
+    cr.mask(g)
+    s.flush()
+
+    val (_, _, _, left) = pixel(s, 1, 16)
+    val (_, _, _, right) = pixel(s, 30, 16)
+
+    assert(left < 30u8, "the transparent end of the mask let almost nothing through")
+    assert(right > 220u8, "and the opaque end let almost everything through")
+
+    g.destroy()
+    cr.destroy()
+    s.destroy()
+end a_mask_supplies_the_alpha
+
+@test
+an_arc_and_a_curve_put_ink_where_they_should()
+    var s = image_surface(FORMAT_ARGB32, 64, 64)
+    var cr = context(s)
+
+    cr.set_source_rgb(0.0, 0.0, 0.0)
+    cr.arc(32.0, 32.0, 20.0, 0.0, 2.0 * pi)
+    cr.fill()
+    s.flush()
+
+    val (_, _, _, middle) = pixel(s, 32, 32)
+    val (_, _, _, corner) = pixel(s, 2, 2)
+
+    assert_eq(middle, 255u8, "the middle of the circle is filled")
+    assert_eq(corner, 0u8, "and the corner of the square is not")
+
+    cr.new_path()
+    cr.move_to(0.0, 60.0)
+    cr.curve_to(20.0, 0.0, 40.0, 0.0, 60.0, 60.0)
+    cr.set_line_width(4.0)
+    cr.stroke()
+
+    assert(cr.ok(), "a Bézier strokes without complaint")
+
+    cr.destroy()
+    s.destroy()
+end an_arc_and_a_curve_put_ink_where_they_should
+
+@test
+text_becomes_a_path_that_can_be_stroked()
+    var s = image_surface(FORMAT_ARGB32, 200, 60)
+    var cr = context(s)
+
+    cr.select_font_face("serif", FONT_SLANT_NORMAL, FONT_WEIGHT_BOLD)
+    cr.set_font_size(40.0)
+
+    val te = cr.text_extents("joy")
+
+    cr.move_to(10.0, 45.0)
+    cr.text_path("joy")
+
+    val (x1, _, x2, _) = cr.path_extents()
+
+    assert(x2 > x1, "the text became a path with a width")
+
+    // The path occupies the box the measurement predicted — which is the assertion worth making,
+    // since it ties the two halves of the text API together. It is not the box starting at the pen:
+    // a serif `j` reaches to the left of the origin, so `x_bearing` is negative and the path with it.
+    assert(x2 - x1 > te.width - 1.0 && x2 - x1 < te.width + 1.0, "as wide as the ink was measured to be")
+    assert(x1 > 10.0 + te.x_bearing - 1.0 && x1 < 10.0 + te.x_bearing + 1.0, "starting at the pen plus the bearing")
+
+    cr.set_source_rgb(0.0, 0.0, 0.0)
+    cr.set_line_width(1.0)
+    cr.stroke()
+
+    assert(cr.ok(), "and it strokes like any other path")
+
+    cr.destroy()
+    s.destroy()
+end text_becomes_a_path_that_can_be_stroked
