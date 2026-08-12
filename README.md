@@ -11,7 +11,7 @@ sudo apt install libcairo2-dev     # Debian / Ubuntu
 
 ```hocon
 dependencies {
-  cairo { git = "github.com/sysl-lang/cairo", version = "0.1.0" }
+  cairo { git = "github.com/sysl-lang/cairo", version = "0.2.0" }
 }
 ```
 
@@ -20,7 +20,7 @@ import sh.sysl.cairo.*
 import sysl.math.pi
 
 main()
-    var s = image_surface(FORMAT_ARGB32, 200, 200)
+    var s = image_surface(Format.Argb32, 200, 200)
     var cr = context(s)
 
     cr.set_source_rgb(0.1, 0.2, 0.9)
@@ -28,8 +28,6 @@ main()
     cr.fill()
 
     s.write_png("circle.png")
-    cr.destroy()
-    s.destroy()
 ```
 
 The library has to be found at link time, which on a Homebrew machine is one flag:
@@ -86,16 +84,43 @@ test asserting exactly that.
 **A constructor never answers null** for the same reason — cairo hands back a static "nil" object
 whose `status()` says why — so there is no `Option` here. Ask `ok()` if you want to know.
 
-Handles are reference counted, and released by hand
----------------------------------------------------
+Nothing is closed by hand
+-------------------------
 
-`Surface`, `Context`, `Pattern`, `FontOptions`, `FontFace` and `ScaledFont` each hold a C allocation
-and each has a `destroy`. They are not released for you: sysl has no way to adopt a raw pointer as
-owned storage, so cairo's own `destroy` is a call the caller makes. Every one of them nulls its
-handle, so **destroying twice is harmless** rather than a double free.
+`Surface`, `Context`, `Pattern`, `FontOptions`, `FontFace` and `ScaledFont` each hold a C allocation,
+each is reached through `&T`, and each has an `impl Drop` that releases it when the last reference
+goes. **There is no `destroy` in this API**, and no `reference` either: cairo's objects are reference
+counted and so is `&T`, so the two agree. A surface handed to a pattern outlives the variable it was
+made in because the pattern took a count of its own.
 
-`reference()` takes a count and `destroy()` drops one, which is how a surface handed to a pattern
-outlives the variable it was made in.
+A handle cairo *lends* rather than gives — `Context.target`, `.source`, `.font_face`, `.scaled_font`
+— is referenced before it is wrapped, so what comes back owns a share like anything else. The
+previous shape of this package could only warn about those in a comment, and getting it wrong was a
+use-after-free.
+
+Every enumeration is an enum
+----------------------------
+
+`set_operator` takes an `Operator`, `image_surface` takes a `Format`, `status()` answers a `Status`.
+There is no way to pass a `Filter` where a `LineCap` belongs, or a bare `3`:
+
+```sysl
+cr.set_line_cap(LineCap.Round)
+cr.set_operator(Operator.Multiply)
+
+if cr.line_cap() == LineCap.Round
+    print(cr.antialias())            -- "subpixel", not "3"
+```
+
+Each carries `code()` for the number C wants and `of(code)` for the number C gave, and each has an
+`Other(code: int)` arm — so a cairo newer than this binding reporting something it has not heard of
+keeps a program running and printing rather than stopping at a `match` with no arm for it.
+
+The 138 values behind them were **checked against `cairo.h` by compiling them**, and they agree.
+They are still transcribed rather than asked of the C compiler with a `c const` block: doing that
+would make this package compile C for the first time, which turns "install libcairo" into "install
+the development headers and pass an include path". That is a trade to make deliberately, and it is
+not made here — which is why the `--include-path` note above still holds.
 
 What is here
 ------------

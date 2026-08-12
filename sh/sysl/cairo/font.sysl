@@ -22,40 +22,35 @@ import sysl.text.cstring
 
 // A typeface with no size. Obtained from a context rather than constructed.
 struct FontFace
-    handle: *u8
+    handle: *externs.FontFace
 
-    status(self) -> Status = Status(externs.font_face_status(self.handle))
-    ok(self) -> bool = self.status().ok()
+    status(&self) -> Status = Status.of(externs.font_face_status(self.handle))
+    ok(&self) -> bool = self.status().ok()
 
-    // Which backend made it, as a `FONT_TYPE_*` value. A face from `select_font_face` is
-    // `FONT_TYPE_TOY`, whatever the platform resolved it to underneath.
-    kind(self) -> int = externs.font_face_get_type(self.handle)
+    // Which backend made it. A face from `select_font_face` is `FontType.Toy`, whatever the platform
+    // resolved it to underneath.
+    kind(&self) -> FontType = FontType.of(externs.font_face_get_type(self.handle))
 
-    reference_count(self) -> uint = externs.font_face_get_reference_count(self.handle)
-
-    // Take a reference, so the face outlives the context it came from.
-    reference(self) -> FontFace = FontFace(externs.font_face_reference(self.handle))
-
-    destroy(*self)
-        if self.handle != null
-            externs.font_face_destroy(self.handle)
-            self.handle = null
+    reference_count(&self) -> uint = externs.font_face_get_reference_count(self.handle)
 end FontFace
+
+impl Drop for FontFace
+    drop(self) = externs.font_face_destroy(self.handle)
 
 // A face, a size, a transform and a set of options, resolved into the thing that draws.
 struct ScaledFont
-    handle: *u8
+    handle: *externs.ScaledFont
 
-    status(self) -> Status = Status(externs.scaled_font_status(self.handle))
-    ok(self) -> bool = self.status().ok()
+    status(&self) -> Status = Status.of(externs.scaled_font_status(self.handle))
+    ok(&self) -> bool = self.status().ok()
 
-    reference(self) -> ScaledFont = ScaledFont(externs.scaled_font_reference(self.handle))
-
-    // The face it was made from, borrowed.
-    face(self) -> FontFace = FontFace(externs.scaled_font_get_font_face(self.handle))
+    // The face it was made from. Cairo lends it, so a reference is taken before it is wrapped and
+    // what comes back owns a share like anything else.
+    face(&self) -> &FontFace =
+        FontFace(externs.font_face_reference(externs.scaled_font_get_font_face(self.handle)))
 
     // The font's own metrics, with no string involved.
-    extents(self) -> FontExtents
+    extents(&self) -> FontExtents
         var e = font_extents()
 
         externs.scaled_font_extents(self.handle, e.ptr())
@@ -63,72 +58,74 @@ struct ScaledFont
     end extents
 
     // What a string would occupy — the measurement a layout engine wants, with no context needed.
-    text_extents(self, text: string) -> TextExtents
+    text_extents(&self, text: string) -> TextExtents
         var t = cstring(text)
         var e = text_extents()
 
         externs.scaled_font_text_extents(self.handle, t.ptr, e.ptr())
         e
     end text_extents
-
-    destroy(*self)
-        if self.handle != null
-            externs.scaled_font_destroy(self.handle)
-            self.handle = null
 end ScaledFont
 
-// How glyphs are to be rendered. Every setting has a `DEFAULT` that means "whatever the platform
+impl Drop for ScaledFont
+    drop(self) = externs.scaled_font_destroy(self.handle)
+
+// How glyphs are to be rendered. Every setting has a `Default` that means "whatever the platform
 // says", which is normally what you want — these exist for the cases where it is not.
 struct FontOptions
-    handle: *u8
+    handle: *externs.FontOptions
 
-    status(self) -> Status = Status(externs.font_options_status(self.handle))
-    ok(self) -> bool = self.status().ok()
+    status(&self) -> Status = Status.of(externs.font_options_status(self.handle))
+    ok(&self) -> bool = self.status().ok()
 
-    // An independent copy, which must be destroyed in its turn.
-    copy(self) -> FontOptions = FontOptions(externs.font_options_copy(self.handle))
+    // An independent copy.
+    copy(&self) -> &FontOptions = FontOptions(externs.font_options_copy(self.handle))
 
-    // Take every setting of `other` that is not `DEFAULT`, leaving the rest alone.
-    merge(*self, other: FontOptions) = externs.font_options_merge(self.handle, other.handle)
+    // Take every setting of `other` that is not `Default`, leaving the rest alone.
+    merge(&self, other: &FontOptions) = externs.font_options_merge(self.handle, other.handle)
 
     // Whether two sets of options would render identically.
-    equal(self, other: FontOptions) -> bool = externs.font_options_equal(self.handle, other.handle)
+    equal(&self, other: &FontOptions) -> bool = externs.font_options_equal(self.handle, other.handle)
 
-    hash(self) -> u64 = externs.font_options_hash(self.handle)
+    hash(&self) -> u64 = externs.font_options_hash(self.handle)
 
-    set_antialias(*self, antialias: int) = externs.font_options_set_antialias(self.handle, antialias)
-    antialias(self) -> int = externs.font_options_get_antialias(self.handle)
+    set_antialias(&self, antialias: Antialias) =
+        externs.font_options_set_antialias(self.handle, antialias.code())
+    antialias(&self) -> Antialias = Antialias.of(externs.font_options_get_antialias(self.handle))
 
-    // Which way the subpixels of the display are ordered, for `ANTIALIAS_SUBPIXEL`. Wrong here and
+    // Which way the subpixels of the display are ordered, for `Antialias.Subpixel`. Wrong here and
     // text acquires coloured fringes.
-    set_subpixel_order(*self, order: int) = externs.font_options_set_subpixel_order(self.handle, order)
-    subpixel_order(self) -> int = externs.font_options_get_subpixel_order(self.handle)
+    set_subpixel_order(&self, order: SubpixelOrder) =
+        externs.font_options_set_subpixel_order(self.handle, order.code())
+    subpixel_order(&self) -> SubpixelOrder =
+        SubpixelOrder.of(externs.font_options_get_subpixel_order(self.handle))
 
     // How far outlines are distorted to line up with the pixel grid. Sharper at small sizes and
-    // less faithful to the design; `HINT_STYLE_NONE` is what a PDF wants.
-    set_hint_style(*self, style: int) = externs.font_options_set_hint_style(self.handle, style)
-    hint_style(self) -> int = externs.font_options_get_hint_style(self.handle)
+    // less faithful to the design; `HintStyle.Off` is what a PDF wants.
+    set_hint_style(&self, style: HintStyle) =
+        externs.font_options_set_hint_style(self.handle, style.code())
+    hint_style(&self) -> HintStyle = HintStyle.of(externs.font_options_get_hint_style(self.handle))
 
     // Whether *metrics* are rounded to whole pixels too. Turning this off is what makes text scale
     // smoothly in an animation, at the cost of blurrier stems.
-    set_hint_metrics(*self, metrics: int) = externs.font_options_set_hint_metrics(self.handle, metrics)
-    hint_metrics(self) -> int = externs.font_options_get_hint_metrics(self.handle)
-
-    destroy(*self)
-        if self.handle != null
-            externs.font_options_destroy(self.handle)
-            self.handle = null
+    set_hint_metrics(&self, metrics: HintMetrics) =
+        externs.font_options_set_hint_metrics(self.handle, metrics.code())
+    hint_metrics(&self) -> HintMetrics =
+        HintMetrics.of(externs.font_options_get_hint_metrics(self.handle))
 end FontOptions
 
-// A fresh set of options, every one of them `DEFAULT`.
-font_options() -> FontOptions = FontOptions(externs.font_options_create())
+impl Drop for FontOptions
+    drop(self) = externs.font_options_destroy(self.handle)
+
+// A fresh set of options, every one of them `Default`.
+font_options() -> &FontOptions = FontOptions(externs.font_options_create())
 
 // A face at a size, ready to measure and draw with.
 //
 // `font_matrix` carries the size — `identity()` scaled by the point size is the usual one — and
 // `ctm` is the transform the text will be drawn under, which cairo needs in order to hint against
 // the right pixel grid.
-scaled_font(face: FontFace, font_matrix: Matrix, ctm: Matrix, options: FontOptions) -> ScaledFont
+scaled_font(face: &FontFace, font_matrix: Matrix, ctm: Matrix, options: &FontOptions) -> &ScaledFont
     var fm = font_matrix
     var cm = ctm
 

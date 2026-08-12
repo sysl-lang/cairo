@@ -7,7 +7,7 @@
 // build a path, and the context carries the state — source, line width, transform, clip, font — that
 // the fill or stroke uses.
 //
-//     var s = image_surface(FORMAT_ARGB32, 200, 200)
+//     var s = image_surface(Format.Argb32, 200, 200)
 //     var cr = context(s)
 //
 //     cr.set_source_rgb(0.1, 0.2, 0.9)
@@ -15,8 +15,6 @@
 //     cr.fill()
 //
 //     s.write_png("circle.png")
-//     cr.destroy()
-//     s.destroy()
 //
 // **The same drawing code writes a PDF**, because only the first line changes:
 //
@@ -25,6 +23,19 @@
 // That is the reason to reach for cairo over `sh.sysl.plutovg`, which rasterizes and stops there.
 // The other reason is the opposite one: plutovg carries its own C and asks for no system library, so
 // it runs on a microcontroller, and cairo does not. Neither replaces the other.
+//
+// ## Nothing is closed by hand
+//
+// There is no `destroy` in this API. `Surface`, `Context`, `Pattern`, `FontFace`, `ScaledFont` and
+// `FontOptions` each hold a C allocation, each is reached through `&T`, and each has an `impl Drop`
+// that releases it when the last reference goes. Cairo's objects are reference counted and so is
+// `&T`, so the two agree: a surface handed to a pattern outlives the variable it was made in,
+// because the pattern took a count of its own.
+//
+// **A handle cairo lends rather than gives — `Context.target`, `.source`, `.font_face` — is
+// referenced before it is wrapped**, so what comes back owns a share like anything else. The
+// previous shape of this package could only warn about those in a comment; there is nothing left to
+// warn about.
 //
 // ## Errors live on the object
 //
@@ -43,224 +54,765 @@
 // **A constructor never answers null**, for the same reason. When cairo cannot make a surface it
 // answers a static "nil" object whose `status()` says why and which ignores everything asked of it,
 // so there is no `Option` here — ask `ok()` if you want to know.
-//
-// ## Closing things
-//
-// `Surface`, `Context`, `Pattern`, `FontOptions` and `ScaledFont` each hold a C allocation and each
-// has a `destroy`. They are not released for you: sysl has no way to adopt a raw pointer as owned
-// storage, so cairo's own `destroy` is a call the caller makes. Every one of them nulls its handle,
-// so destroying twice is harmless rather than a double free.
-//
-// They are **reference counted** underneath — `reference()` takes a count and `destroy()` drops one
-// — which is how a surface handed to a pattern outlives the variable it was made in.
 
 module sh.sysl.cairo
 
 import sh.sysl.cairo.externs
 import sysl.text.from_cstring
 
-// ## What a call reports when you ask
+// ## The enumerations
 //
-// Sticky, and shared by every kind of object: `Context.status`, `Surface.status`, `Pattern.status`
-// and `FontOptions.status` all answer one of these.
-struct Status
-    code: int
+// **Each of cairo's enumerations is a sysl enum**, so a wrong one cannot be passed: `set_operator`
+// takes an `Operator` and there is no way to hand it a `Filter`, or a bare `3`. The previous shape
+// of this package made them all `const … : int` on the argument that they cross to C as `int` and an
+// enum would need converting at every call. **The conversion turned out to be one `match` per type
+// and the type safety is worth more than it costs** — these are `int`s in the same sense that a C
+// pointer is an integer.
+//
+// Every one of them carries the same two members: `code(self)` for the number C wants, and an
+// associated `of(code)` for the number C gave. `Other` exists on the enums cairo can *answer* so
+// that a newer cairo reporting something this binding has not heard of keeps a program running and
+// printing, rather than stopping at a `match` with no arm for it.
+//
+// The values themselves were **checked against `cairo.h` by compiling them**, all 138 of them, and
+// they agree. They are still transcribed rather than asked of the C compiler: a `c const` block
+// would make this package compile C for the first time, which turns "install libcairo" into "install
+// the development headers and pass an include path". That trade is worth making deliberately and is
+// not made here.
+
+// What has gone wrong, as cairo reports it. Sticky, and shared by every kind of object:
+// `Context.status`, `Surface.status`, `Pattern.status` and `FontOptions.status` all answer one.
+enum Status
+    Success
+    NoMemory
+    InvalidRestore
+    InvalidPopGroup
+    NoCurrentPoint
+    InvalidMatrix
+    InvalidStatus
+    NullPointer
+    InvalidString
+    InvalidPathData
+    ReadError
+    WriteError
+    SurfaceFinished
+    SurfaceTypeMismatch
+    PatternTypeMismatch
+    InvalidContent
+    InvalidFormat
+    InvalidVisual
+    FileNotFound
+    InvalidDash
+
+    // A failure this binding does not name. Cairo has some sixty of them and the twenty above are
+    // the ones a drawing program meets; the number is kept so `message` is still cairo's own
+    // sentence for exactly this failure.
+    Other(code: int)
 
     // Nothing has gone wrong. The only value a program normally tests.
-    ok(self) -> bool = self.code == 0
+    ok(self) -> bool = self.code() == 0
 
     // Cairo's own sentence for it — "out of memory", "invalid matrix (not invertible)", and so on.
     // The string is a static one inside the library, so nothing here owns it.
     message(self) -> string =
-        from_cstring(externs.status_to_string(self.code)).unwrap_or("an error cairo could not describe")
+        from_cstring(externs.status_to_string(self.code())).unwrap_or("an error cairo could not describe")
+
+    code(self) -> int
+        self match
+            Success -> 0
+            NoMemory -> 1
+            InvalidRestore -> 2
+            InvalidPopGroup -> 3
+            NoCurrentPoint -> 4
+            InvalidMatrix -> 5
+            InvalidStatus -> 6
+            NullPointer -> 7
+            InvalidString -> 8
+            InvalidPathData -> 9
+            ReadError -> 10
+            WriteError -> 11
+            SurfaceFinished -> 12
+            SurfaceTypeMismatch -> 13
+            PatternTypeMismatch -> 14
+            InvalidContent -> 15
+            InvalidFormat -> 16
+            InvalidVisual -> 17
+            FileNotFound -> 18
+            InvalidDash -> 19
+            Other(c) -> c
+
+    of(code: int) -> Status
+        code match
+            0 -> Success
+            1 -> NoMemory
+            2 -> InvalidRestore
+            3 -> InvalidPopGroup
+            4 -> NoCurrentPoint
+            5 -> InvalidMatrix
+            6 -> InvalidStatus
+            7 -> NullPointer
+            8 -> InvalidString
+            9 -> InvalidPathData
+            10 -> ReadError
+            11 -> WriteError
+            12 -> SurfaceFinished
+            13 -> SurfaceTypeMismatch
+            14 -> PatternTypeMismatch
+            15 -> InvalidContent
+            16 -> InvalidFormat
+            17 -> InvalidVisual
+            18 -> FileNotFound
+            19 -> InvalidDash
+            c -> Other(c)
 end Status
 
-// So that `print(s)` and `f"$s%s"` say the sentence rather than the number.
+// So that `print(s)` and `f"$s"` say the sentence rather than the number.
 impl Display for Status
     display(self, out: *Writer, fmt: FormatSpec) = display_str(self.message(), out, fmt)
-end Status
 
-const STATUS_SUCCESS: int = 0
-const STATUS_NO_MEMORY: int = 1
-const STATUS_INVALID_RESTORE: int = 2
-const STATUS_INVALID_POP_GROUP: int = 3
-const STATUS_NO_CURRENT_POINT: int = 4
-const STATUS_INVALID_MATRIX: int = 5
-const STATUS_INVALID_STATUS: int = 6
-const STATUS_NULL_POINTER: int = 7
-const STATUS_INVALID_STRING: int = 8
-const STATUS_INVALID_PATH_DATA: int = 9
-const STATUS_READ_ERROR: int = 10
-const STATUS_WRITE_ERROR: int = 11
-const STATUS_SURFACE_FINISHED: int = 12
-const STATUS_SURFACE_TYPE_MISMATCH: int = 13
-const STATUS_PATTERN_TYPE_MISMATCH: int = 14
-const STATUS_INVALID_CONTENT: int = 15
-const STATUS_INVALID_FORMAT: int = 16
-const STATUS_INVALID_VISUAL: int = 17
-const STATUS_FILE_NOT_FOUND: int = 18
-const STATUS_INVALID_DASH: int = 19
+// How the pixels of an image surface are laid out. `Argb32` is premultiplied and is what you want
+// unless you know otherwise; `Rgb24` is the same 32 bits with the alpha byte unused.
+enum Format
+    Invalid
+    Argb32
+    Rgb24
+    A8
+    A1
+    Rgb16_565
+    Rgb30
+    Rgb96f
+    Rgba128f
+    Other(code: int)
 
-// ## The enumerations
-//
-// These are the C enum values, and they are `const` rather than sysl `enum`s deliberately: they
-// cross to C as plain `int`, and a sysl enum would need converting at every call. The names are the
-// header's own, shortened by their `CAIRO_` prefix.
+    code(self) -> int
+        self match
+            Invalid -> -1
+            Argb32 -> 0
+            Rgb24 -> 1
+            A8 -> 2
+            A1 -> 3
+            Rgb16_565 -> 4
+            Rgb30 -> 5
+            Rgb96f -> 6
+            Rgba128f -> 7
+            Other(c) -> c
 
-// How the pixels of an image surface are laid out. `ARGB32` is premultiplied and is what you want
-// unless you know otherwise; `RGB24` is the same 32 bits with the alpha byte unused.
-const FORMAT_INVALID: int = -1
-const FORMAT_ARGB32: int = 0
-const FORMAT_RGB24: int = 1
-const FORMAT_A8: int = 2
-const FORMAT_A1: int = 3
-const FORMAT_RGB16_565: int = 4
-const FORMAT_RGB30: int = 5
-const FORMAT_RGB96F: int = 6
-const FORMAT_RGBA128F: int = 7
+    of(code: int) -> Format
+        code match
+            -1 -> Invalid
+            0 -> Argb32
+            1 -> Rgb24
+            2 -> A8
+            3 -> A1
+            4 -> Rgb16_565
+            5 -> Rgb30
+            6 -> Rgb96f
+            7 -> Rgba128f
+            c -> Other(c)
+
+    // The row length cairo requires for this format at a width, which is `width * bytes` rounded up
+    // to whatever alignment the machine wants. Negative for a format cairo does not know.
+    stride_for_width(self, width: int) -> int = externs.format_stride_for_width(self.code(), width)
+end Format
+
+impl Display for Format
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Invalid -> "invalid"
+            Argb32 -> "argb32"
+            Rgb24 -> "rgb24"
+            A8 -> "a8"
+            A1 -> "a1"
+            Rgb16_565 -> "rgb16-565"
+            Rgb30 -> "rgb30"
+            Rgb96f -> "rgb96f"
+            Rgba128f -> "rgba128f"
+            Other(c) -> "an unknown format"
+
+        display_str(s, out, fmt)
 
 // What a surface holds, where the format is the backend's business rather than the caller's.
-const CONTENT_COLOR: int = 0x1000
-const CONTENT_ALPHA: int = 0x2000
-const CONTENT_COLOR_ALPHA: int = 0x3000
+enum Content
+    Color
+    Alpha
+    ColorAlpha
+    Other(code: int)
 
-// How the source is combined with what is already there. `OVER` is the default and is ordinary
+    code(self) -> int
+        self match
+            Color -> 0x1000
+            Alpha -> 0x2000
+            ColorAlpha -> 0x3000
+            Other(c) -> c
+
+    of(code: int) -> Content
+        code match
+            0x1000 -> Color
+            0x2000 -> Alpha
+            0x3000 -> ColorAlpha
+            c -> Other(c)
+end Content
+
+// How the source is combined with what is already there. `Over` is the default and is ordinary
 // alpha compositing; the second half of the list is the Porter-Duff and blend-mode set.
-const OPERATOR_CLEAR: int = 0
-const OPERATOR_SOURCE: int = 1
-const OPERATOR_OVER: int = 2
-const OPERATOR_IN: int = 3
-const OPERATOR_OUT: int = 4
-const OPERATOR_ATOP: int = 5
-const OPERATOR_DEST: int = 6
-const OPERATOR_DEST_OVER: int = 7
-const OPERATOR_DEST_IN: int = 8
-const OPERATOR_DEST_OUT: int = 9
-const OPERATOR_DEST_ATOP: int = 10
-const OPERATOR_XOR: int = 11
-const OPERATOR_ADD: int = 12
-const OPERATOR_SATURATE: int = 13
-const OPERATOR_MULTIPLY: int = 14
-const OPERATOR_SCREEN: int = 15
-const OPERATOR_OVERLAY: int = 16
-const OPERATOR_DARKEN: int = 17
-const OPERATOR_LIGHTEN: int = 18
-const OPERATOR_COLOR_DODGE: int = 19
-const OPERATOR_COLOR_BURN: int = 20
-const OPERATOR_HARD_LIGHT: int = 21
-const OPERATOR_SOFT_LIGHT: int = 22
-const OPERATOR_DIFFERENCE: int = 23
-const OPERATOR_EXCLUSION: int = 24
-const OPERATOR_HSL_HUE: int = 25
-const OPERATOR_HSL_SATURATION: int = 26
-const OPERATOR_HSL_COLOR: int = 27
-const OPERATOR_HSL_LUMINOSITY: int = 28
+enum Operator
+    Clear
+    Source
+    Over
+    In
+    Out
+    Atop
+    Dest
+    DestOver
+    DestIn
+    DestOut
+    DestAtop
+    Xor
+    Add
+    Saturate
+    Multiply
+    Screen
+    Overlay
+    Darken
+    Lighten
+    ColorDodge
+    ColorBurn
+    HardLight
+    SoftLight
+    Difference
+    Exclusion
+    HslHue
+    HslSaturation
+    HslColor
+    HslLuminosity
+    Other(code: int)
 
-const ANTIALIAS_DEFAULT: int = 0
-const ANTIALIAS_NONE: int = 1
-const ANTIALIAS_GRAY: int = 2
-const ANTIALIAS_SUBPIXEL: int = 3
-const ANTIALIAS_FAST: int = 4
-const ANTIALIAS_GOOD: int = 5
-const ANTIALIAS_BEST: int = 6
+    code(self) -> int
+        self match
+            Clear -> 0
+            Source -> 1
+            Over -> 2
+            In -> 3
+            Out -> 4
+            Atop -> 5
+            Dest -> 6
+            DestOver -> 7
+            DestIn -> 8
+            DestOut -> 9
+            DestAtop -> 10
+            Xor -> 11
+            Add -> 12
+            Saturate -> 13
+            Multiply -> 14
+            Screen -> 15
+            Overlay -> 16
+            Darken -> 17
+            Lighten -> 18
+            ColorDodge -> 19
+            ColorBurn -> 20
+            HardLight -> 21
+            SoftLight -> 22
+            Difference -> 23
+            Exclusion -> 24
+            HslHue -> 25
+            HslSaturation -> 26
+            HslColor -> 27
+            HslLuminosity -> 28
+            Other(c) -> c
+
+    of(code: int) -> Operator
+        code match
+            0 -> Clear
+            1 -> Source
+            2 -> Over
+            3 -> In
+            4 -> Out
+            5 -> Atop
+            6 -> Dest
+            7 -> DestOver
+            8 -> DestIn
+            9 -> DestOut
+            10 -> DestAtop
+            11 -> Xor
+            12 -> Add
+            13 -> Saturate
+            14 -> Multiply
+            15 -> Screen
+            16 -> Overlay
+            17 -> Darken
+            18 -> Lighten
+            19 -> ColorDodge
+            20 -> ColorBurn
+            21 -> HardLight
+            22 -> SoftLight
+            23 -> Difference
+            24 -> Exclusion
+            25 -> HslHue
+            26 -> HslSaturation
+            27 -> HslColor
+            28 -> HslLuminosity
+            c -> Other(c)
+end Operator
+
+// How edges are smoothed. `Default` lets cairo choose for the backend.
+enum Antialias
+    Default
+    Off
+    Gray
+    Subpixel
+    Fast
+    Good
+    Best
+    Other(code: int)
+
+    code(self) -> int
+        self match
+            Default -> 0
+            Off -> 1
+            Gray -> 2
+            Subpixel -> 3
+            Fast -> 4
+            Good -> 5
+            Best -> 6
+            Other(c) -> c
+
+    of(code: int) -> Antialias
+        code match
+            0 -> Default
+            1 -> Off
+            2 -> Gray
+            3 -> Subpixel
+            4 -> Fast
+            5 -> Good
+            6 -> Best
+            c -> Other(c)
+end Antialias
 
 // How a path decides what is inside it when it crosses itself.
-const FILL_RULE_WINDING: int = 0
-const FILL_RULE_EVEN_ODD: int = 1
+enum FillRule
+    Winding
+    EvenOdd
+    Other(code: int)
 
-// How a stroke ends, and how two segments meet.
-const LINE_CAP_BUTT: int = 0
-const LINE_CAP_ROUND: int = 1
-const LINE_CAP_SQUARE: int = 2
+    code(self) -> int
+        self match
+            Winding -> 0
+            EvenOdd -> 1
+            Other(c) -> c
 
-const LINE_JOIN_MITER: int = 0
-const LINE_JOIN_ROUND: int = 1
-const LINE_JOIN_BEVEL: int = 2
+    of(code: int) -> FillRule
+        code match
+            0 -> Winding
+            1 -> EvenOdd
+            c -> Other(c)
+end FillRule
 
-const FONT_SLANT_NORMAL: int = 0
-const FONT_SLANT_ITALIC: int = 1
-const FONT_SLANT_OBLIQUE: int = 2
+// How a stroke ends.
+enum LineCap
+    Butt
+    Round
+    Square
+    Other(code: int)
 
-const FONT_WEIGHT_NORMAL: int = 0
-const FONT_WEIGHT_BOLD: int = 1
+    code(self) -> int
+        self match
+            Butt -> 0
+            Round -> 1
+            Square -> 2
+            Other(c) -> c
 
-const SUBPIXEL_ORDER_DEFAULT: int = 0
-const SUBPIXEL_ORDER_RGB: int = 1
-const SUBPIXEL_ORDER_BGR: int = 2
-const SUBPIXEL_ORDER_VRGB: int = 3
-const SUBPIXEL_ORDER_VBGR: int = 4
+    of(code: int) -> LineCap
+        code match
+            0 -> Butt
+            1 -> Round
+            2 -> Square
+            c -> Other(c)
+end LineCap
 
-const HINT_STYLE_DEFAULT: int = 0
-const HINT_STYLE_NONE: int = 1
-const HINT_STYLE_SLIGHT: int = 2
-const HINT_STYLE_MEDIUM: int = 3
-const HINT_STYLE_FULL: int = 4
+// How two segments of a stroke meet.
+enum LineJoin
+    Miter
+    Round
+    Bevel
+    Other(code: int)
 
-const HINT_METRICS_DEFAULT: int = 0
-const HINT_METRICS_OFF: int = 1
-const HINT_METRICS_ON: int = 2
+    code(self) -> int
+        self match
+            Miter -> 0
+            Round -> 1
+            Bevel -> 2
+            Other(c) -> c
 
-// What a pattern does outside the area it was defined for.
-const EXTEND_NONE: int = 0
-const EXTEND_REPEAT: int = 1
-const EXTEND_REFLECT: int = 2
-const EXTEND_PAD: int = 3
+    of(code: int) -> LineJoin
+        code match
+            0 -> Miter
+            1 -> Round
+            2 -> Bevel
+            c -> Other(c)
+end LineJoin
 
-// How a surface pattern is sampled when it is scaled.
-const FILTER_FAST: int = 0
-const FILTER_GOOD: int = 1
-const FILTER_BEST: int = 2
-const FILTER_NEAREST: int = 3
-const FILTER_BILINEAR: int = 4
-const FILTER_GAUSSIAN: int = 5
+enum FontSlant
+    Normal
+    Italic
+    Oblique
+    Other(code: int)
 
-// What `Surface.kind` answers. Only the ones this package can produce are named.
-const SURFACE_TYPE_IMAGE: int = 0
-const SURFACE_TYPE_PDF: int = 1
-const SURFACE_TYPE_PS: int = 2
-const SURFACE_TYPE_SVG: int = 10
-const SURFACE_TYPE_RECORDING: int = 16
+    code(self) -> int
+        self match
+            Normal -> 0
+            Italic -> 1
+            Oblique -> 2
+            Other(c) -> c
 
-const PATTERN_TYPE_SOLID: int = 0
-const PATTERN_TYPE_SURFACE: int = 1
-const PATTERN_TYPE_LINEAR: int = 2
-const PATTERN_TYPE_RADIAL: int = 3
-const PATTERN_TYPE_MESH: int = 4
-const PATTERN_TYPE_RASTER_SOURCE: int = 5
+    of(code: int) -> FontSlant
+        code match
+            0 -> Normal
+            1 -> Italic
+            2 -> Oblique
+            c -> Other(c)
+end FontSlant
 
-const FONT_TYPE_TOY: int = 0
-const FONT_TYPE_FT: int = 1
-const FONT_TYPE_WIN32: int = 2
-const FONT_TYPE_QUARTZ: int = 3
-const FONT_TYPE_USER: int = 4
-const FONT_TYPE_DWRITE: int = 5
+enum FontWeight
+    Normal
+    Bold
+    Other(code: int)
 
-// ### The vector backends' own values
+    code(self) -> int
+        self match
+            Normal -> 0
+            Bold -> 1
+            Other(c) -> c
 
-const PDF_VERSION_1_4: int = 0
-const PDF_VERSION_1_5: int = 1
-const PDF_VERSION_1_6: int = 2
-const PDF_VERSION_1_7: int = 3
+    of(code: int) -> FontWeight
+        code match
+            0 -> Normal
+            1 -> Bold
+            c -> Other(c)
+end FontWeight
 
-const PDF_METADATA_TITLE: int = 0
-const PDF_METADATA_AUTHOR: int = 1
-const PDF_METADATA_SUBJECT: int = 2
-const PDF_METADATA_KEYWORDS: int = 3
-const PDF_METADATA_CREATOR: int = 4
-const PDF_METADATA_CREATE_DATE: int = 5
-const PDF_METADATA_MOD_DATE: int = 6
+// The order of the coloured stripes in a pixel, for subpixel antialiasing.
+enum SubpixelOrder
+    Default
+    Rgb
+    Bgr
+    Vrgb
+    Vbgr
+    Other(code: int)
 
-const PDF_OUTLINE_FLAG_OPEN: int = 0x1
-const PDF_OUTLINE_FLAG_BOLD: int = 0x2
-const PDF_OUTLINE_FLAG_ITALIC: int = 0x4
+    code(self) -> int
+        self match
+            Default -> 0
+            Rgb -> 1
+            Bgr -> 2
+            Vrgb -> 3
+            Vbgr -> 4
+            Other(c) -> c
+
+    of(code: int) -> SubpixelOrder
+        code match
+            0 -> Default
+            1 -> Rgb
+            2 -> Bgr
+            3 -> Vrgb
+            4 -> Vbgr
+            c -> Other(c)
+end SubpixelOrder
+
+// How far glyph outlines are distorted to line up with the pixel grid.
+enum HintStyle
+    Default
+    Off
+    Slight
+    Medium
+    Full
+    Other(code: int)
+
+    code(self) -> int
+        self match
+            Default -> 0
+            Off -> 1
+            Slight -> 2
+            Medium -> 3
+            Full -> 4
+            Other(c) -> c
+
+    of(code: int) -> HintStyle
+        code match
+            0 -> Default
+            1 -> Off
+            2 -> Slight
+            3 -> Medium
+            4 -> Full
+            c -> Other(c)
+end HintStyle
+
+// Whether glyph advances are rounded to whole pixels — off is what a PDF wants, on is what a screen
+// wants.
+enum HintMetrics
+    Default
+    Off
+    On
+    Other(code: int)
+
+    code(self) -> int
+        self match
+            Default -> 0
+            Off -> 1
+            On -> 2
+            Other(c) -> c
+
+    of(code: int) -> HintMetrics
+        code match
+            0 -> Default
+            1 -> Off
+            2 -> On
+            c -> Other(c)
+end HintMetrics
+
+// What a pattern does outside the area it was defined for. A gradient defaults to `Pad` and a
+// surface to `None`.
+enum Extend
+    Nothing
+    Repeat
+    Reflect
+    Pad
+    Other(code: int)
+
+    code(self) -> int
+        self match
+            Nothing -> 0
+            Repeat -> 1
+            Reflect -> 2
+            Pad -> 3
+            Other(c) -> c
+
+    of(code: int) -> Extend
+        code match
+            0 -> Nothing
+            1 -> Repeat
+            2 -> Reflect
+            3 -> Pad
+            c -> Other(c)
+end Extend
+
+// How a surface pattern is sampled when it is not at its natural size. `Nearest` is what pixel art
+// wants; `Good` is the default.
+enum Filter
+    Fast
+    Good
+    Best
+    Nearest
+    Bilinear
+    Gaussian
+    Other(code: int)
+
+    code(self) -> int
+        self match
+            Fast -> 0
+            Good -> 1
+            Best -> 2
+            Nearest -> 3
+            Bilinear -> 4
+            Gaussian -> 5
+            Other(c) -> c
+
+    of(code: int) -> Filter
+        code match
+            0 -> Fast
+            1 -> Good
+            2 -> Best
+            3 -> Nearest
+            4 -> Bilinear
+            5 -> Gaussian
+            c -> Other(c)
+end Filter
+
+// What `Surface.kind` answers. Only the ones this package can produce are named; cairo has a dozen
+// more for window systems it was built against.
+enum SurfaceType
+    Image
+    Pdf
+    Ps
+    Svg
+    Recording
+    Other(code: int)
+
+    code(self) -> int
+        self match
+            Image -> 0
+            Pdf -> 1
+            Ps -> 2
+            Svg -> 10
+            Recording -> 16
+            Other(c) -> c
+
+    of(code: int) -> SurfaceType
+        code match
+            0 -> Image
+            1 -> Pdf
+            2 -> Ps
+            10 -> Svg
+            16 -> Recording
+            c -> Other(c)
+end SurfaceType
+
+impl Display for SurfaceType
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Image -> "image"
+            Pdf -> "pdf"
+            Ps -> "postscript"
+            Svg -> "svg"
+            Recording -> "recording"
+            Other(c) -> "another backend"
+
+        display_str(s, out, fmt)
+
+enum PatternType
+    Solid
+    SurfacePattern
+    Linear
+    Radial
+    Mesh
+    RasterSource
+    Other(code: int)
+
+    code(self) -> int
+        self match
+            Solid -> 0
+            SurfacePattern -> 1
+            Linear -> 2
+            Radial -> 3
+            Mesh -> 4
+            RasterSource -> 5
+            Other(c) -> c
+
+    of(code: int) -> PatternType
+        code match
+            0 -> Solid
+            1 -> SurfacePattern
+            2 -> Linear
+            3 -> Radial
+            4 -> Mesh
+            5 -> RasterSource
+            c -> Other(c)
+end PatternType
+
+enum FontType
+    Toy
+    Ft
+    Win32
+    Quartz
+    User
+    DWrite
+    Other(code: int)
+
+    code(self) -> int
+        self match
+            Toy -> 0
+            Ft -> 1
+            Win32 -> 2
+            Quartz -> 3
+            User -> 4
+            DWrite -> 5
+            Other(c) -> c
+
+    of(code: int) -> FontType
+        code match
+            0 -> Toy
+            1 -> Ft
+            2 -> Win32
+            3 -> Quartz
+            4 -> User
+            5 -> DWrite
+            c -> Other(c)
+end FontType
+
+// ## The vector backends' own values
+
+enum PdfVersion
+    V1_4
+    V1_5
+    V1_6
+    V1_7
+    Other(code: int)
+
+    code(self) -> int
+        self match
+            V1_4 -> 0
+            V1_5 -> 1
+            V1_6 -> 2
+            V1_7 -> 3
+            Other(c) -> c
+
+    // The name of a PDF version, as `"PDF 1.7"`.
+    name(self) -> string =
+        from_cstring(externs.pdf_version_to_string(self.code())).unwrap_or("unknown")
+end PdfVersion
+
+impl Display for PdfVersion
+    display(self, out: *Writer, fmt: FormatSpec) = display_str(self.name(), out, fmt)
+
+// One of the document's standard metadata fields.
+enum PdfMetadata
+    Title
+    Author
+    Subject
+    Keywords
+    Creator
+    CreateDate
+    ModDate
+
+    code(self) -> int
+        self match
+            Title -> 0
+            Author -> 1
+            Subject -> 2
+            Keywords -> 3
+            Creator -> 4
+            CreateDate -> 5
+            ModDate -> 6
+end PdfMetadata
+
+enum SvgVersion
+    V1_1
+    V1_2
+    Other(code: int)
+
+    code(self) -> int
+        self match
+            V1_1 -> 0
+            V1_2 -> 1
+            Other(c) -> c
+
+    name(self) -> string =
+        from_cstring(externs.svg_version_to_string(self.code())).unwrap_or("unknown")
+end SvgVersion
+
+impl Display for SvgVersion
+    display(self, out: *Writer, fmt: FormatSpec) = display_str(self.name(), out, fmt)
+
+// How a bookmark appears in the viewer's sidebar. **A set rather than a choice**, so it is a struct
+// with `|` rather than an enum: `OutlineFlags.bold() | OutlineFlags.open()` is the pair of them.
+struct OutlineFlags
+    bits: int
+
+    // Expanded when the document opens, rather than collapsed.
+    open() -> OutlineFlags = OutlineFlags(0x1)
+    bold() -> OutlineFlags = OutlineFlags(0x2)
+    italic() -> OutlineFlags = OutlineFlags(0x4)
+
+    // No flags at all, which is the ordinary entry.
+    plain() -> OutlineFlags = OutlineFlags(0)
+end OutlineFlags
+
+impl BitOr for OutlineFlags
+    bitor(self, rhs: OutlineFlags) -> OutlineFlags = OutlineFlags(self.bits | rhs.bits)
 
 // The parent of a top-level outline entry.
-const PDF_OUTLINE_ROOT: int = 0
+const OUTLINE_ROOT: int = 0
 
-const SVG_VERSION_1_1: int = 0
-const SVG_VERSION_1_2: int = 1
-
-// ### Tag names for `Context.tag_begin`
+// ## Tag names for `Context.tag_begin`
 //
 // Cairo gives two of these a meaning of its own; everything else is a PDF structure tag and is
 // written as its own string.
@@ -282,3 +834,280 @@ version() -> string = from_cstring(externs.version_string()).unwrap_or("unknown"
 
 // The same, encoded as `major * 10000 + minor * 100 + micro`, which is what a comparison wants.
 version_number() -> int = externs.version()
+
+// ## Comparing and printing them
+//
+// Every enum above answers `==` and prints as a word rather than a number, so a test reads
+// `assert_eq(cr.line_cap(), LineCap.Round)` and a diagnostic says `round`. Equality is by the code
+// C uses, which is what makes `Other(1)` from an older cairo equal to the variant a newer binding
+// would have named.
+//
+// **A simple enum needs no block** — with no variant carrying anything its value *is* its
+// discriminant, so `==` is already that comparison and the compiler refuses a hand-written one.
+// `PdfMetadata` is the only one here in that position; every other enum has an `Other` arm.
+
+impl Eq for Status
+    eq(self, rhs: Status) -> bool = self.code() == rhs.code()
+
+impl Eq for Format
+    eq(self, rhs: Format) -> bool = self.code() == rhs.code()
+
+impl Eq for Content
+    eq(self, rhs: Content) -> bool = self.code() == rhs.code()
+
+impl Eq for Operator
+    eq(self, rhs: Operator) -> bool = self.code() == rhs.code()
+
+impl Eq for Antialias
+    eq(self, rhs: Antialias) -> bool = self.code() == rhs.code()
+
+impl Eq for FillRule
+    eq(self, rhs: FillRule) -> bool = self.code() == rhs.code()
+
+impl Eq for LineCap
+    eq(self, rhs: LineCap) -> bool = self.code() == rhs.code()
+
+impl Eq for LineJoin
+    eq(self, rhs: LineJoin) -> bool = self.code() == rhs.code()
+
+impl Eq for FontSlant
+    eq(self, rhs: FontSlant) -> bool = self.code() == rhs.code()
+
+impl Eq for FontWeight
+    eq(self, rhs: FontWeight) -> bool = self.code() == rhs.code()
+
+impl Eq for SubpixelOrder
+    eq(self, rhs: SubpixelOrder) -> bool = self.code() == rhs.code()
+
+impl Eq for HintStyle
+    eq(self, rhs: HintStyle) -> bool = self.code() == rhs.code()
+
+impl Eq for HintMetrics
+    eq(self, rhs: HintMetrics) -> bool = self.code() == rhs.code()
+
+impl Eq for Extend
+    eq(self, rhs: Extend) -> bool = self.code() == rhs.code()
+
+impl Eq for Filter
+    eq(self, rhs: Filter) -> bool = self.code() == rhs.code()
+
+impl Eq for SurfaceType
+    eq(self, rhs: SurfaceType) -> bool = self.code() == rhs.code()
+
+impl Eq for PatternType
+    eq(self, rhs: PatternType) -> bool = self.code() == rhs.code()
+
+impl Eq for FontType
+    eq(self, rhs: FontType) -> bool = self.code() == rhs.code()
+
+impl Eq for PdfVersion
+    eq(self, rhs: PdfVersion) -> bool = self.code() == rhs.code()
+
+
+impl Eq for SvgVersion
+    eq(self, rhs: SvgVersion) -> bool = self.code() == rhs.code()
+
+impl Display for Content
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Color -> "colour"
+            Alpha -> "alpha"
+            ColorAlpha -> "colour and alpha"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for Operator
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Clear -> "clear"
+            Source -> "source"
+            Over -> "over"
+            In -> "in"
+            Out -> "out"
+            Atop -> "atop"
+            Dest -> "dest"
+            DestOver -> "dest-over"
+            DestIn -> "dest-in"
+            DestOut -> "dest-out"
+            DestAtop -> "dest-atop"
+            Xor -> "xor"
+            Add -> "add"
+            Saturate -> "saturate"
+            Multiply -> "multiply"
+            Screen -> "screen"
+            Overlay -> "overlay"
+            Darken -> "darken"
+            Lighten -> "lighten"
+            ColorDodge -> "colour-dodge"
+            ColorBurn -> "colour-burn"
+            HardLight -> "hard-light"
+            SoftLight -> "soft-light"
+            Difference -> "difference"
+            Exclusion -> "exclusion"
+            HslHue -> "hsl-hue"
+            HslSaturation -> "hsl-saturation"
+            HslColor -> "hsl-colour"
+            HslLuminosity -> "hsl-luminosity"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for Antialias
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Default -> "default"
+            Off -> "off"
+            Gray -> "gray"
+            Subpixel -> "subpixel"
+            Fast -> "fast"
+            Good -> "good"
+            Best -> "best"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for FillRule
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Winding -> "winding"
+            EvenOdd -> "even-odd"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for LineCap
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Butt -> "butt"
+            Round -> "round"
+            Square -> "square"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for LineJoin
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Miter -> "miter"
+            Round -> "round"
+            Bevel -> "bevel"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for FontSlant
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Normal -> "normal"
+            Italic -> "italic"
+            Oblique -> "oblique"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for FontWeight
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Normal -> "normal"
+            Bold -> "bold"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for SubpixelOrder
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Default -> "default"
+            Rgb -> "rgb"
+            Bgr -> "bgr"
+            Vrgb -> "vrgb"
+            Vbgr -> "vbgr"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for HintStyle
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Default -> "default"
+            Off -> "off"
+            Slight -> "slight"
+            Medium -> "medium"
+            Full -> "full"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for HintMetrics
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Default -> "default"
+            Off -> "off"
+            On -> "on"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for Extend
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Nothing -> "none"
+            Repeat -> "repeat"
+            Reflect -> "reflect"
+            Pad -> "pad"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for Filter
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Fast -> "fast"
+            Good -> "good"
+            Best -> "best"
+            Nearest -> "nearest"
+            Bilinear -> "bilinear"
+            Gaussian -> "gaussian"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for PatternType
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Solid -> "solid"
+            SurfacePattern -> "surface"
+            Linear -> "linear"
+            Radial -> "radial"
+            Mesh -> "mesh"
+            RasterSource -> "raster source"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for FontType
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Toy -> "toy"
+            Ft -> "freetype"
+            Win32 -> "win32"
+            Quartz -> "quartz"
+            User -> "user"
+            DWrite -> "directwrite"
+            Other(c) -> "an unknown value"
+
+        display_str(s, out, fmt)
+
+impl Display for PdfMetadata
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Title -> "title"
+            Author -> "author"
+            Subject -> "subject"
+            Keywords -> "keywords"
+            Creator -> "creator"
+            CreateDate -> "creation date"
+            ModDate -> "modification date"
+
+        display_str(s, out, fmt)

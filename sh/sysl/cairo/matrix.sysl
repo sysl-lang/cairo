@@ -44,9 +44,9 @@ struct Matrix
     rotate(*self, radians: real) = externs.matrix_rotate(self.ptr(), radians)
 
     // Replace this matrix with its inverse. Answers a status, because a matrix that squashes the
-    // plane onto a line has none — that is `STATUS_INVALID_MATRIX`, and this is one of the few
+    // plane onto a line has none — that is `Status.InvalidMatrix`, and this is one of the few
     // places in cairo where a failure is returned rather than recorded.
-    invert(*self) -> Status = Status(externs.matrix_invert(self.ptr()))
+    invert(*self) -> Status = Status.of(externs.matrix_invert(self.ptr()))
 
     // Transform a point, and transform a distance. A distance ignores the translation, which is the
     // whole difference between the two: a vector moves under rotation and scaling and not under a

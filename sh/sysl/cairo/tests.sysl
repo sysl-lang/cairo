@@ -15,7 +15,7 @@ import sysl.math.pi
 // assertion here looks impossible.
 
 // The pixel at `(x, y)` of an image surface, as `(r, g, b, a)`.
-pixel(s: Surface, x: int, y: int) -> (u8, u8, u8, u8)
+pixel(s: &Surface, x: int, y: int) -> (u8, u8, u8, u8)
     val stride = usize(s.stride())
     val d = s.data()
     val i = usize(y) * stride + usize(x) * 4
@@ -33,13 +33,13 @@ end the_library_says_which_version_it_is
 
 @test
 a_fill_puts_the_source_colour_in_the_pixels()
-    var s = image_surface(FORMAT_ARGB32, 32, 32)
+    var s = image_surface(Format.Argb32, 32, 32)
 
     assert(s.ok(), "the surface was created")
     assert_eq(s.width(), 32, "it is as wide as it was asked to be")
     assert_eq(s.height(), 32, "and as tall")
-    assert_eq(s.format(), FORMAT_ARGB32, "in the format it was asked for")
-    assert_eq(s.kind(), SURFACE_TYPE_IMAGE, "an image surface knows it is one")
+    assert_eq(s.format(), Format.Argb32, "in the format it was asked for")
+    assert_eq(s.kind(), SurfaceType.Image, "an image surface knows it is one")
 
     var cr = context(s)
 
@@ -60,20 +60,18 @@ a_fill_puts_the_source_colour_in_the_pixels()
     assert_eq(outside, 0u8, "outside the rectangle nothing was painted")
     assert(cr.ok(), "and nothing went wrong")
 
-    cr.destroy()
-    s.destroy()
 end a_fill_puts_the_source_colour_in_the_pixels
 
 @test
 a_status_is_sticky_and_says_what_went_wrong()
-    var s = image_surface(FORMAT_ARGB32, 8, 8)
+    var s = image_surface(Format.Argb32, 8, 8)
     var cr = context(s)
 
     // A `restore` with no matching `save` is the cheapest way to put a context into an error state.
     cr.restore()
 
     assert(!cr.ok(), "the context is no longer usable")
-    assert_eq(cr.status().code, STATUS_INVALID_RESTORE, "and says which mistake it was")
+    assert_eq(cr.status(), Status.InvalidRestore, "and says which mistake it was")
     assert_eq(cr.status().message(), "cairo_restore() without matching cairo_save()", "in cairo's own words")
 
     // The failure shields everything afterwards: a perfectly good call changes nothing.
@@ -84,45 +82,64 @@ a_status_is_sticky_and_says_what_went_wrong()
     val (_, _, _, a) = pixel(s, 4, 4)
 
     assert_eq(a, 0u8, "the paint after the error did not happen")
-    assert_eq(cr.status().code, STATUS_INVALID_RESTORE, "and the first error is still the one reported")
+    assert_eq(cr.status(), Status.InvalidRestore, "and the first error is still the one reported")
 
-    cr.destroy()
-    s.destroy()
 end a_status_is_sticky_and_says_what_went_wrong
 
 @test
-destroying_twice_is_harmless()
-    var s = image_surface(FORMAT_ARGB32, 8, 8)
+nothing_is_closed_by_hand()
+    var s = image_surface(Format.Argb32, 8, 8)
     var cr = context(s)
 
-    assert_eq(cr.reference_count(), 1, "a fresh context holds one reference")
+    assert_eq(cr.reference_count(), 1, "a fresh context holds one cairo reference")
 
-    cr.destroy()
-    cr.destroy()
-    s.destroy()
-    s.destroy()
+    // Cairo's count is not sysl's, and it is **cairo's business how many it keeps** — `cairo_create`
+    // happens to take more than one, for the target and for the graphics state. What this asserts is
+    // only that making a context did not leave the surface on its original count, which is what
+    // makes the surface safe to stop naming here.
+    assert(s.reference_count() > 1, "and the context took references of its own to the surface")
 
-    assert(true, "neither second call reached cairo")
-end destroying_twice_is_harmless
+    // There is no `destroy` to call. Both objects are released when the last `&T` goes, which is
+    // the end of this function.
+    assert(cr.ok(), "and nothing went wrong")
+end nothing_is_closed_by_hand
 
 @test
-a_reference_outlives_the_handle_it_came_from()
-    var s = image_surface(FORMAT_ARGB32, 8, 8)
-    var second = s.reference()
+an_alias_keeps_the_surface_alive()
+    var s = image_surface(Format.Argb32, 8, 8)
 
-    assert_eq(s.reference_count(), 2, "two references are outstanding")
+    // A second name for the same object. **Cairo's count does not move** — this is sysl's
+    // reference, not one of cairo's, which is the whole reason `reference()` left the API.
+    var alias = s
 
-    s.destroy()
+    assert_eq(s.reference_count(), 1, "aliasing in sysl costs cairo nothing")
+    assert(alias.ok(), "and both names reach the same live surface")
 
-    assert(second.ok(), "the surface is still alive through the other one")
-    assert_eq(second.reference_count(), 1, "and only one reference is left")
+    alias.flush()
 
-    second.destroy()
-end a_reference_outlives_the_handle_it_came_from
+    assert_eq(alias.width(), 8, "which answers for itself")
+end an_alias_keeps_the_surface_alive
+
+@test
+a_borrowed_handle_comes_back_owning_a_reference()
+    var s = image_surface(Format.Argb32, 8, 8)
+    var cr = context(s)
+
+    val before = s.reference_count()
+
+    // Cairo *lends* its target rather than giving it, so the binding takes a reference before
+    // wrapping it. Without that the `Drop` on the returned `&Surface` would release a surface the
+    // context is still drawing on — a use-after-free the old API could only warn about in prose.
+    var t = cr.target()
+
+    assert_eq(t.width(), 8, "the target is the surface the context was made on")
+    assert_eq(s.reference_count(), before + 1, "and asking for it took exactly one reference")
+    assert(t.ok(), "so it is safe to hold after the context goes")
+end a_borrowed_handle_comes_back_owning_a_reference
 
 @test
 the_graphics_state_is_saved_and_restored()
-    var s = image_surface(FORMAT_ARGB32, 8, 8)
+    var s = image_surface(Format.Argb32, 8, 8)
     var cr = context(s)
 
     cr.set_line_width(4.0)
@@ -135,29 +152,27 @@ the_graphics_state_is_saved_and_restored()
 
     assert_eq(cr.line_width(), 4.0, "and the outer one came back")
 
-    cr.set_line_cap(LINE_CAP_ROUND)
-    cr.set_line_join(LINE_JOIN_BEVEL)
-    cr.set_fill_rule(FILL_RULE_EVEN_ODD)
-    cr.set_operator(OPERATOR_ADD)
+    cr.set_line_cap(LineCap.Round)
+    cr.set_line_join(LineJoin.Bevel)
+    cr.set_fill_rule(FillRule.EvenOdd)
+    cr.set_operator(Operator.Add)
     cr.set_miter_limit(3.0)
     cr.set_tolerance(0.25)
-    cr.set_antialias(ANTIALIAS_NONE)
+    cr.set_antialias(Antialias.Off)
 
-    assert_eq(cr.line_cap(), LINE_CAP_ROUND, "the cap reads back")
-    assert_eq(cr.line_join(), LINE_JOIN_BEVEL, "the join reads back")
-    assert_eq(cr.fill_rule(), FILL_RULE_EVEN_ODD, "the fill rule reads back")
-    assert_eq(cr.operator(), OPERATOR_ADD, "the operator reads back")
+    assert_eq(cr.line_cap(), LineCap.Round, "the cap reads back")
+    assert_eq(cr.line_join(), LineJoin.Bevel, "the join reads back")
+    assert_eq(cr.fill_rule(), FillRule.EvenOdd, "the fill rule reads back")
+    assert_eq(cr.operator(), Operator.Add, "the operator reads back")
     assert_eq(cr.miter_limit(), 3.0, "the miter limit reads back")
     assert_eq(cr.tolerance(), 0.25, "the tolerance reads back")
-    assert_eq(cr.antialias(), ANTIALIAS_NONE, "the antialias mode reads back")
+    assert_eq(cr.antialias(), Antialias.Off, "the antialias mode reads back")
 
-    cr.destroy()
-    s.destroy()
 end the_graphics_state_is_saved_and_restored
 
 @test
 a_dash_pattern_is_copied_out_of_the_slice()
-    var s = image_surface(FORMAT_ARGB32, 8, 8)
+    var s = image_surface(Format.Argb32, 8, 8)
     var cr = context(s)
     val dashes = [4.0, 2.0, 1.0]
 
@@ -169,13 +184,11 @@ a_dash_pattern_is_copied_out_of_the_slice()
 
     assert_eq(cr.dash_count(), 0, "and an empty slice draws solid again")
 
-    cr.destroy()
-    s.destroy()
 end a_dash_pattern_is_copied_out_of_the_slice
 
 @test
 a_path_reports_where_it_is_and_what_it_covers()
-    var s = image_surface(FORMAT_ARGB32, 64, 64)
+    var s = image_surface(Format.Argb32, 64, 64)
     var cr = context(s)
 
     assert(!cr.has_current_point(), "a fresh path has no current point")
@@ -207,13 +220,11 @@ a_path_reports_where_it_is_and_what_it_covers()
 
     assert(!cr.has_current_point(), "and a new path discards all of it")
 
-    cr.destroy()
-    s.destroy()
 end a_path_reports_where_it_is_and_what_it_covers
 
 @test
 a_stroke_covers_more_ground_than_a_fill()
-    var s = image_surface(FORMAT_ARGB32, 64, 64)
+    var s = image_surface(Format.Argb32, 64, 64)
     var cr = context(s)
 
     cr.set_line_width(10.0)
@@ -232,13 +243,11 @@ a_stroke_covers_more_ground_than_a_fill()
     assert(cr.in_stroke(20.0, 30.0), "the edge is on the stroke")
     assert(!cr.in_stroke(30.0, 30.0), "and the middle is not")
 
-    cr.destroy()
-    s.destroy()
 end a_stroke_covers_more_ground_than_a_fill
 
 @test
 a_clip_keeps_paint_out()
-    var s = image_surface(FORMAT_ARGB32, 32, 32)
+    var s = image_surface(Format.Argb32, 32, 32)
     var cr = context(s)
 
     cr.rectangle(0.0, 0.0, 16.0, 16.0)
@@ -267,13 +276,11 @@ a_clip_keeps_paint_out()
 
     assert_eq(wide, 32.0, "resetting the clip gives the whole surface back")
 
-    cr.destroy()
-    s.destroy()
 end a_clip_keeps_paint_out
 
 @test
 the_transform_moves_user_space()
-    var s = image_surface(FORMAT_ARGB32, 32, 32)
+    var s = image_surface(Format.Argb32, 32, 32)
     var cr = context(s)
 
     cr.translate(10.0, 5.0)
@@ -307,8 +314,6 @@ the_transform_moves_user_space()
 
     assert_eq(ix, 1.0, "and it can be thrown away again")
 
-    cr.destroy()
-    s.destroy()
 end the_transform_moves_user_space
 
 @test
@@ -335,7 +340,7 @@ a_matrix_is_the_callers_own_storage()
 
     var flat = Matrix(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
-    assert_eq(flat.invert().code, STATUS_INVALID_MATRIX, "and a degenerate one does not")
+    assert_eq(flat.invert(), Status.InvalidMatrix, "and a degenerate one does not")
 
     var t = identity()
 
@@ -354,21 +359,21 @@ end a_matrix_is_the_callers_own_storage
 
 @test
 a_gradient_is_different_at_its_two_ends()
-    var s = image_surface(FORMAT_ARGB32, 64, 8)
+    var s = image_surface(Format.Argb32, 64, 8)
     var cr = context(s)
     var g = linear_pattern(0.0, 0.0, 64.0, 0.0)
 
     assert(g.ok(), "the gradient was created")
-    assert_eq(g.kind(), PATTERN_TYPE_LINEAR, "and knows which kind it is")
+    assert_eq(g.kind(), PatternType.Linear, "and knows which kind it is")
 
     g.add_color_stop_rgb(0.0, 1.0, 0.0, 0.0)
     g.add_color_stop_rgb(1.0, 0.0, 0.0, 1.0)
 
     assert_eq(g.color_stop_count().expect("a gradient counts its stops"), 2, "both stops were added")
 
-    g.set_extend(EXTEND_REFLECT)
+    g.set_extend(Extend.Reflect)
 
-    assert_eq(g.extend(), EXTEND_REFLECT, "the extend mode reads back")
+    assert_eq(g.extend(), Extend.Reflect, "the extend mode reads back")
 
     cr.set_source(g)
     cr.paint()
@@ -382,9 +387,6 @@ a_gradient_is_different_at_its_two_ends()
     assert(rb > 200u8, "the right end is blue")
     assert(rr < 60u8, "and not red")
 
-    g.destroy()
-    cr.destroy()
-    s.destroy()
 end a_gradient_is_different_at_its_two_ends
 
 @test
@@ -392,7 +394,7 @@ a_solid_pattern_says_it_is_solid()
     var p = solid_pattern_rgba(0.0, 1.0, 0.0, 0.5)
 
     assert(p.ok(), "the pattern was created")
-    assert_eq(p.kind(), PATTERN_TYPE_SOLID, "and knows which kind it is")
+    assert_eq(p.kind(), PatternType.Solid, "and knows which kind it is")
     assert(p.color_stop_count().is_none(), "a solid colour has no stops to count")
 
     var m = identity()
@@ -402,19 +404,17 @@ a_solid_pattern_says_it_is_solid()
 
     assert_eq(p.matrix().xx, 2.0, "a pattern's own matrix reads back")
 
-    p.destroy()
 end a_solid_pattern_says_it_is_solid
 
 @test
 one_surface_is_painted_onto_another()
-    var stamp = image_surface(FORMAT_ARGB32, 8, 8)
+    var stamp = image_surface(Format.Argb32, 8, 8)
     var sc = context(stamp)
 
     sc.set_source_rgb(0.0, 1.0, 0.0)
     sc.paint()
-    sc.destroy()
 
-    var page = image_surface(FORMAT_ARGB32, 32, 32)
+    var page = image_surface(Format.Argb32, 32, 32)
     var cr = context(page)
 
     cr.set_source_surface(stamp, 16.0, 16.0)
@@ -429,19 +429,15 @@ one_surface_is_painted_onto_another()
 
     var p = surface_pattern(stamp)
 
-    assert_eq(p.kind(), PATTERN_TYPE_SURFACE, "a surface makes a surface pattern")
-    p.set_filter(FILTER_NEAREST)
-    assert_eq(p.filter(), FILTER_NEAREST, "whose filter reads back")
+    assert_eq(p.kind(), PatternType.SurfacePattern, "a surface makes a surface pattern")
+    p.set_filter(Filter.Nearest)
+    assert_eq(p.filter(), Filter.Nearest, "whose filter reads back")
 
-    p.destroy()
-    cr.destroy()
-    page.destroy()
-    stamp.destroy()
 end one_surface_is_painted_onto_another
 
 @test
 a_group_is_given_one_opacity()
-    var s = image_surface(FORMAT_ARGB32, 16, 16)
+    var s = image_surface(Format.Argb32, 16, 16)
     var cr = context(s)
 
     cr.push_group()
@@ -451,7 +447,7 @@ a_group_is_given_one_opacity()
     var g = cr.pop_group()
 
     assert(g.ok(), "the group came back as a pattern")
-    assert_eq(g.kind(), PATTERN_TYPE_SURFACE, "over the surface it recorded onto")
+    assert_eq(g.kind(), PatternType.SurfacePattern, "over the surface it recorded onto")
 
     cr.set_source(g)
     cr.paint_with_alpha(0.5)
@@ -462,17 +458,14 @@ a_group_is_given_one_opacity()
     assert(a > 100u8 && a < 160u8, "the whole group came out half transparent")
     assert(r > 100u8 && r < 160u8, "and premultiplied red halved with it")
 
-    g.destroy()
-    cr.destroy()
-    s.destroy()
 end a_group_is_given_one_opacity
 
 @test
 text_measures_and_draws()
-    var s = image_surface(FORMAT_ARGB32, 200, 60)
+    var s = image_surface(Format.Argb32, 200, 60)
     var cr = context(s)
 
-    cr.select_font_face("serif", FONT_SLANT_NORMAL, FONT_WEIGHT_BOLD)
+    cr.select_font_face("serif", FontSlant.Normal, FontWeight.Bold)
     cr.set_font_size(30.0)
 
     val fe = cr.font_extents()
@@ -516,33 +509,31 @@ text_measures_and_draws()
     assert(inked, "something was actually drawn")
     assert(cr.ok(), "and nothing went wrong doing it")
 
-    cr.destroy()
-    s.destroy()
 end text_measures_and_draws
 
 @test
 a_scaled_font_measures_without_a_context()
-    var s = image_surface(FORMAT_ARGB32, 8, 8)
+    var s = image_surface(Format.Argb32, 8, 8)
     var cr = context(s)
 
-    cr.select_font_face("serif", FONT_SLANT_ITALIC, FONT_WEIGHT_NORMAL)
+    cr.select_font_face("serif", FontSlant.Italic, FontWeight.Normal)
     cr.set_font_size(20.0)
 
-    var face = cr.font_face().reference()
+    var face = cr.font_face()
 
     assert(face.ok(), "the context had a face to hand back")
-    assert_eq(face.kind(), FONT_TYPE_TOY, "chosen by the toy interface")
+    assert_eq(face.kind(), FontType.Toy, "chosen by the toy interface")
 
     var opts = font_options()
 
     assert(opts.ok(), "a fresh set of options is usable")
-    opts.set_hint_style(HINT_STYLE_NONE)
-    opts.set_hint_metrics(HINT_METRICS_OFF)
-    opts.set_antialias(ANTIALIAS_GRAY)
+    opts.set_hint_style(HintStyle.Off)
+    opts.set_hint_metrics(HintMetrics.Off)
+    opts.set_antialias(Antialias.Gray)
 
-    assert_eq(opts.hint_style(), HINT_STYLE_NONE, "the hint style reads back")
-    assert_eq(opts.hint_metrics(), HINT_METRICS_OFF, "the metrics setting reads back")
-    assert_eq(opts.antialias(), ANTIALIAS_GRAY, "the antialias mode reads back")
+    assert_eq(opts.hint_style(), HintStyle.Off, "the hint style reads back")
+    assert_eq(opts.hint_metrics(), HintMetrics.Off, "the metrics setting reads back")
+    assert_eq(opts.antialias(), Antialias.Gray, "the antialias mode reads back")
 
     var copy = opts.copy()
 
@@ -565,20 +556,14 @@ a_scaled_font_measures_without_a_context()
 
     assert(fe.ascent > 0.0, "and reports the font's own metrics")
 
-    sf.destroy()
-    copy.destroy()
-    opts.destroy()
-    face.destroy()
-    cr.destroy()
-    s.destroy()
 end a_scaled_font_measures_without_a_context
 
 @test
 glyphs_are_drawn_by_index()
-    var s = image_surface(FORMAT_ARGB32, 64, 64)
+    var s = image_surface(Format.Argb32, 64, 64)
     var cr = context(s)
 
-    cr.select_font_face("serif", FONT_SLANT_NORMAL, FONT_WEIGHT_NORMAL)
+    cr.select_font_face("serif", FontSlant.Normal, FontWeight.Normal)
     cr.set_font_size(24.0)
 
     val glyphs = [Glyph(40, 10.0, 40.0), Glyph(41, 30.0, 40.0)]
@@ -592,18 +577,15 @@ glyphs_are_drawn_by_index()
 
     assert(cr.ok(), "and cairo accepted the array as it lays one out")
 
-    cr.destroy()
-    s.destroy()
 end glyphs_are_drawn_by_index
 
 @test
 a_png_survives_a_round_trip_through_memory()
-    var s = image_surface(FORMAT_ARGB32, 16, 16)
+    var s = image_surface(Format.Argb32, 16, 16)
     var cr = context(s)
 
     cr.set_source_rgb(0.0, 0.0, 1.0)
     cr.paint()
-    cr.destroy()
 
     val bytes = s.png_bytes().expect("the surface encoded")
 
@@ -621,19 +603,16 @@ a_png_survives_a_round_trip_through_memory()
     assert_eq(b, 255u8, "with the same blue in it")
     assert_eq(a, 255u8, "and still opaque")
 
-    back.destroy()
-    s.destroy()
 end a_png_survives_a_round_trip_through_memory
 
 @test
 a_png_is_written_to_a_file_and_read_back()
     val path = "cairo-test-roundtrip.png"
-    var s = image_surface(FORMAT_ARGB32, 16, 16)
+    var s = image_surface(Format.Argb32, 16, 16)
     var cr = context(s)
 
     cr.set_source_rgb(0.0, 1.0, 0.0)
     cr.paint()
-    cr.destroy()
 
     assert(s.write_png(path).ok(), "the PNG was written")
     assert(is_file(path), "and the file is there")
@@ -646,8 +625,6 @@ a_png_is_written_to_a_file_and_read_back()
 
     assert_eq(g, 255u8, "with the colour that went into it")
 
-    back.destroy()
-    s.destroy()
     remove_file(path).expect("the test cleaned up after itself")
 end a_png_is_written_to_a_file_and_read_back
 
@@ -657,15 +634,15 @@ the_same_drawing_goes_to_a_pdf()
     var s = pdf_surface(path, 612.0, 792.0)
 
     assert(s.ok(), "the PDF surface was created")
-    assert_eq(s.kind(), SURFACE_TYPE_PDF, "and knows which backend it is")
+    assert_eq(s.kind(), SurfaceType.Pdf, "and knows which backend it is")
 
-    pdf_set_metadata(s, PDF_METADATA_TITLE, "a test page")
-    pdf_set_metadata(s, PDF_METADATA_AUTHOR, "sh.sysl.cairo")
+    pdf_set_metadata(s, PdfMetadata.Title, "a test page")
+    pdf_set_metadata(s, PdfMetadata.Author, "sh.sysl.cairo")
     pdf_set_custom_metadata(s, "Purpose", "proving the binding")
     pdf_set_page_label(s, "Cover")
-    pdf_restrict_to_version(s, PDF_VERSION_1_7)
+    pdf_restrict_to_version(s, PdfVersion.V1_7)
 
-    assert_eq(pdf_version_string(PDF_VERSION_1_7), "PDF 1.7", "a version has a name")
+    assert_eq(PdfVersion.V1_7.name(), "PDF 1.7", "a version has a name")
 
     var cr = context(s)
 
@@ -673,7 +650,7 @@ the_same_drawing_goes_to_a_pdf()
     cr.tag_begin(TAG_DEST, "name='top' x=72 y=72")
     cr.tag_end(TAG_DEST)
 
-    cr.select_font_face("serif", FONT_SLANT_NORMAL, FONT_WEIGHT_BOLD)
+    cr.select_font_face("serif", FontSlant.Normal, FontWeight.Bold)
     cr.set_font_size(24.0)
     cr.move_to(72.0, 100.0)
     cr.show_text("Cairo from sysl")
@@ -693,14 +670,12 @@ the_same_drawing_goes_to_a_pdf()
     cr.tag_end(TAG_LINK)
     cr.tag_end("Document")
 
-    val id = pdf_add_outline(s, PDF_OUTLINE_ROOT, "Cover", "dest='top'", PDF_OUTLINE_FLAG_OPEN + PDF_OUTLINE_FLAG_BOLD)
+    val id = pdf_add_outline(s, OUTLINE_ROOT, "Cover", "dest='top'", OutlineFlags.open() | OutlineFlags.bold())
 
     assert(id > 0, "the outline entry was given an id")
     assert(cr.ok(), "and nothing went wrong writing any of it")
 
-    cr.destroy()
     s.finish()
-    s.destroy()
 
     assert(is_file(path), "the file is there")
 
@@ -719,8 +694,8 @@ the_same_drawing_goes_to_an_svg()
     var s = svg_surface(path, 100.0, 100.0)
 
     assert(s.ok(), "the SVG surface was created")
-    assert_eq(s.kind(), SURFACE_TYPE_SVG, "and knows which backend it is")
-    assert_eq(svg_version_string(SVG_VERSION_1_1), "SVG 1.1", "a version has a name")
+    assert_eq(s.kind(), SurfaceType.Svg, "and knows which backend it is")
+    assert_eq(SvgVersion.V1_1.name(), "SVG 1.1", "a version has a name")
 
     var cr = context(s)
 
@@ -730,9 +705,7 @@ the_same_drawing_goes_to_an_svg()
 
     assert(cr.ok(), "nothing went wrong drawing")
 
-    cr.destroy()
     s.finish()
-    s.destroy()
 
     val bytes = read_bytes(path).expect("the SVG can be read back")
 
@@ -744,17 +717,16 @@ end the_same_drawing_goes_to_an_svg
 
 @test
 a_recording_surface_replays_what_it_was_given()
-    var rec = recording_surface_bounded(CONTENT_COLOR_ALPHA, 0.0, 0.0, 100.0, 100.0)
+    var rec = recording_surface_bounded(Content.ColorAlpha, 0.0, 0.0, 100.0, 100.0)
 
     assert(rec.ok(), "the recording surface was created")
-    assert_eq(rec.kind(), SURFACE_TYPE_RECORDING, "and knows which kind it is")
+    assert_eq(rec.kind(), SurfaceType.Recording, "and knows which kind it is")
 
     var rc = context(rec)
 
     rc.set_source_rgb(1.0, 0.0, 0.0)
     rc.rectangle(10.0, 10.0, 30.0, 30.0)
     rc.fill()
-    rc.destroy()
 
     val (x, y, w, h) = ink_extents(rec)
 
@@ -764,7 +736,7 @@ a_recording_surface_replays_what_it_was_given()
     assert_eq(h, 30.0, "and as tall")
 
     // The point of a recording surface: the same drawing replayed at another scale.
-    var out = image_surface(FORMAT_ARGB32, 50, 50)
+    var out = image_surface(Format.Argb32, 50, 50)
     var cr = context(out)
 
     cr.scale(0.5, 0.5)
@@ -776,19 +748,16 @@ a_recording_surface_replays_what_it_was_given()
 
     assert_eq(r, 255u8, "and it landed at half size")
 
-    cr.destroy()
-    out.destroy()
-    rec.destroy()
 end a_recording_surface_replays_what_it_was_given
 
 @test
 a_surface_can_borrow_the_callers_pixels()
-    val stride = stride_for_width(FORMAT_ARGB32, 16)
+    val stride = Format.Argb32.stride_for_width(16)
 
     assert_eq(stride, 64, "a row of sixteen ARGB32 pixels is sixty-four bytes")
 
     var pixels: [1024]u8 = [0; 1024]
-    var s = image_surface_for_data(pixels[0..<1024], FORMAT_ARGB32, 16, 16, stride)
+    var s = image_surface_for_data(pixels[0..<1024], Format.Argb32, 16, 16, stride)
 
     assert(s.ok(), "the surface was created over the caller's buffer")
 
@@ -796,9 +765,7 @@ a_surface_can_borrow_the_callers_pixels()
 
     cr.set_source_rgb(1.0, 1.0, 0.0)
     cr.paint()
-    cr.destroy()
     s.flush()
-    s.destroy()
 
     // The pixels are still the caller's after the surface is gone, which is the whole point.
     assert_eq(pixels[0], 0u8, "blue is zero in a yellow pixel")
@@ -809,11 +776,11 @@ end a_surface_can_borrow_the_callers_pixels
 
 @test
 a_similar_surface_takes_after_its_original()
-    var s = image_surface(FORMAT_ARGB32, 32, 32)
-    var similar = s.similar(CONTENT_COLOR_ALPHA, 16, 16)
+    var s = image_surface(Format.Argb32, 32, 32)
+    var similar = s.similar(Content.ColorAlpha, 16, 16)
 
     assert(similar.ok(), "a similar surface was made")
-    assert_eq(similar.content(), CONTENT_COLOR_ALPHA, "with the content asked for")
+    assert_eq(similar.content(), Content.ColorAlpha, "with the content asked for")
 
     var sub = s.sub(8.0, 8.0, 16.0, 16.0)
 
@@ -823,8 +790,6 @@ a_similar_surface_takes_after_its_original()
 
     cr.set_source_rgb(1.0, 0.0, 1.0)
     cr.paint()
-    cr.destroy()
-    sub.destroy()
     s.flush()
 
     val (r, _, b, _) = pixel(s, 12, 12)
@@ -834,13 +799,11 @@ a_similar_surface_takes_after_its_original()
     assert_eq(b, 255u8, "in both channels")
     assert_eq(outside, 0u8, "and only within the window")
 
-    similar.destroy()
-    s.destroy()
 end a_similar_surface_takes_after_its_original
 
 @test
 a_device_scale_multiplies_everything_drawn()
-    var s = image_surface(FORMAT_ARGB32, 32, 32)
+    var s = image_surface(Format.Argb32, 32, 32)
 
     s.set_device_scale(2.0, 2.0)
     s.set_device_offset(1.0, 1.0)
@@ -867,13 +830,11 @@ a_device_scale_multiplies_everything_drawn()
     assert_eq(inside, 255u8, "the rectangle covered twice its user size")
     assert_eq(outside, 0u8, "and no more than that")
 
-    cr.destroy()
-    s.destroy()
 end a_device_scale_multiplies_everything_drawn
 
 @test
 a_mask_supplies_the_alpha()
-    var s = image_surface(FORMAT_ARGB32, 32, 32)
+    var s = image_surface(Format.Argb32, 32, 32)
     var cr = context(s)
 
     var g = linear_pattern(0.0, 0.0, 32.0, 0.0)
@@ -891,14 +852,11 @@ a_mask_supplies_the_alpha()
     assert(left < 30u8, "the transparent end of the mask let almost nothing through")
     assert(right > 220u8, "and the opaque end let almost everything through")
 
-    g.destroy()
-    cr.destroy()
-    s.destroy()
 end a_mask_supplies_the_alpha
 
 @test
 an_arc_and_a_curve_put_ink_where_they_should()
-    var s = image_surface(FORMAT_ARGB32, 64, 64)
+    var s = image_surface(Format.Argb32, 64, 64)
     var cr = context(s)
 
     cr.set_source_rgb(0.0, 0.0, 0.0)
@@ -920,16 +878,14 @@ an_arc_and_a_curve_put_ink_where_they_should()
 
     assert(cr.ok(), "a Bézier strokes without complaint")
 
-    cr.destroy()
-    s.destroy()
 end an_arc_and_a_curve_put_ink_where_they_should
 
 @test
 text_becomes_a_path_that_can_be_stroked()
-    var s = image_surface(FORMAT_ARGB32, 200, 60)
+    var s = image_surface(Format.Argb32, 200, 60)
     var cr = context(s)
 
-    cr.select_font_face("serif", FONT_SLANT_NORMAL, FONT_WEIGHT_BOLD)
+    cr.select_font_face("serif", FontSlant.Normal, FontWeight.Bold)
     cr.set_font_size(40.0)
 
     val te = cr.text_extents("joy")
@@ -953,6 +909,66 @@ text_becomes_a_path_that_can_be_stroked()
 
     assert(cr.ok(), "and it strokes like any other path")
 
-    cr.destroy()
-    s.destroy()
 end text_becomes_a_path_that_can_be_stroked
+
+@test
+an_enum_round_trips_through_the_number_c_uses()
+    // The property every one of these conversions has to have: what `of` reads back from a code is
+    // the value that produced it. A transcription error inside a single `match` arm shows up here
+    // and nowhere else, because the two directions are written out separately.
+    assert_eq(Format.of(Format.Argb32.code()), Format.Argb32, "a format survives the round trip")
+    assert_eq(Operator.of(Operator.HslLuminosity.code()), Operator.HslLuminosity, "and the last operator")
+    assert_eq(Status.of(Status.InvalidDash.code()), Status.InvalidDash, "and a status")
+    assert_eq(Extend.of(Extend.Pad.code()), Extend.Pad, "and an extend mode")
+    assert_eq(Filter.of(Filter.Gaussian.code()), Filter.Gaussian, "and a filter")
+    assert_eq(SurfaceType.of(SurfaceType.Recording.code()), SurfaceType.Recording, "and a surface kind")
+    assert_eq(LineCap.of(LineCap.Square.code()), LineCap.Square, "and a line cap")
+    assert_eq(HintStyle.of(HintStyle.Full.code()), HintStyle.Full, "and a hint style")
+
+    // `SurfaceType` is the one whose numbers are not consecutive — SVG is 10 and recording is 16,
+    // with the window-system backends in between — so it is the one a careless `of` would break.
+    assert_eq(SurfaceType.Svg.code(), 10, "svg is where cairo puts it")
+    assert_eq(SurfaceType.Recording.code(), 16, "and so is recording")
+end an_enum_round_trips_through_the_number_c_uses
+
+@test
+an_unknown_code_is_kept_rather_than_lost()
+    // A cairo newer than this binding can answer something not named here. That must not stop a
+    // program at a `match` with no arm, and the number must survive so the failure can still be
+    // reported exactly.
+    val unknown = Status.of(42)
+
+    assert_eq(unknown, Status.Other(42), "an unnamed status keeps its number")
+    assert_eq(unknown.code(), 42, "which reads back unchanged")
+    assert(!unknown.ok(), "and it is not success")
+
+    // Cairo still has a sentence for it, because the message comes from the library rather than
+    // from this list.
+    assert(unknown.message().len > 0, "and cairo still describes it")
+
+    assert_eq(Operator.of(999), Operator.Other(999), "the same holds for an operator")
+    assert_eq(Format.of(-7).code(), -7, "and a negative code is not special")
+end an_unknown_code_is_kept_rather_than_lost
+
+@test
+outline_flags_combine_with_or()
+    // A set rather than a choice, which is why this one is a struct with `|` and not an enum.
+    val both = OutlineFlags.open() | OutlineFlags.bold()
+
+    assert_eq(both.bits, 0x3, "the two flags are the two bits")
+    assert_eq(OutlineFlags.plain().bits, 0, "and no flags is no bits")
+    assert_eq((OutlineFlags.plain() | OutlineFlags.italic()).bits, 0x4, "or-ing with nothing changes nothing")
+end outline_flags_combine_with_or
+
+@test
+a_status_prints_as_cairos_own_sentence()
+    // What a program gets from `print(cr.status())`, and the reason `Status` carries the number
+    // rather than only the name.
+    assert_eq(f"${Status.Success}", "no error has occurred", "success says so in cairo's words")
+    assert_eq(f"${Status.NoMemory}", "out of memory", "and so does a failure")
+
+    // The enums that are choices rather than reports print as a plain word.
+    assert_eq(f"${LineCap.Round}", "round", "a line cap prints as a word")
+    assert_eq(f"${SurfaceType.Pdf}", "pdf", "and so does a backend")
+    assert_eq(f"${Antialias.Subpixel}", "subpixel", "and an antialias mode")
+end a_status_prints_as_cairos_own_sentence

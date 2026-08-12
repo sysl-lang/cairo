@@ -1,8 +1,8 @@
 // Cairo's own surface, declared verbatim.
 //
 // **Nothing here is meant to be called by a program.** Every name and every convention is C's: a
-// context is a raw pointer, a matrix is six doubles behind a pointer, a string is a NUL-terminated
-// `*u8`. The modules beside this one turn those into sysl and are what an application imports.
+// matrix is six doubles behind a pointer, a string is a NUL-terminated `*u8`, an enumeration is an
+// `int`. The modules beside this one turn those into sysl and are what an application imports.
 //
 // The split keeps two jobs apart. This one has to be **faithful** — a signature that disagrees with
 // the C header links perfectly and corrupts the call at run time, and nothing in this arrangement
@@ -13,8 +13,7 @@
 // **Not one public function in cairo takes or returns a struct by value**, which was checked by
 // walking every `cairo_public` declaration in the header rather than by reading a few of them: the
 // only non-scalar parameters in the whole library are enums, which are `int`s, and function
-// pointers. So there is no shim in this package at all, and the `UsefulBufC` problem that reshaped
-// qcbor's entire API simply does not arise.
+// pointers. So there is no shim in this package at all.
 //
 // The structs cairo does have — a matrix, the two kinds of extents, a glyph — are always written
 // through a pointer into storage the *caller* owns, which is the house pattern and needs nothing
@@ -23,124 +22,139 @@
 module sh.sysl.cairo.externs
 @link("cairo")
 
-// ## The drawing context — `cairo_t`
+// ## The handles
 //
-// Reference counted. `cairo_create` answers a context with a count of one, and `cairo_destroy` drops
-// one; a count that reaches zero frees it. A context whose creation failed is not null — cairo
-// answers a static "nil" object instead, whose `cairo_status` reports what went wrong and which
-// ignores every drawing call made on it. That is why nothing here answers a nullable pointer.
+// Cairo publishes no layout for any of these, so each is an `opaque struct` (`15 §9`) and is reached
+// only through a pointer. **That is what stops one being passed where another is wanted**: every
+// handle here was a `*u8` until this package took its second shape, and with one type for all six
+// `cairo_surface_destroy(pattern)` type-checked perfectly and corrupted the heap. Six distinct types
+// cost nothing at run time — a pointer is a pointer — and the compiler now refuses the mix-up.
+//
+// All six are **reference counted**. A `_create` answers a count of one, a `_reference` adds one and
+// a `_destroy` drops one; the object goes when the count reaches zero. A creation that failed is not
+// null — cairo answers a static "nil" object instead, whose `_status` reports what went wrong and
+// which ignores every call made on it. That is why nothing here answers a nullable pointer.
 
-extern "cairo_create" create(target: *u8) -> *u8
-extern "cairo_reference" reference(cr: *u8) -> *u8
-extern "cairo_destroy" destroy(cr: *u8)
-extern "cairo_get_reference_count" get_reference_count(cr: *u8) -> uint
-extern "cairo_status" status(cr: *u8) -> int
+opaque struct Cairo
+opaque struct Surface
+opaque struct Pattern
+opaque struct FontFace
+opaque struct ScaledFont
+opaque struct FontOptions
+
+// ## The drawing context — `cairo_t`
+
+extern "cairo_create" create(target: *Surface) -> *Cairo
+extern "cairo_reference" reference(cr: *Cairo) -> *Cairo
+extern "cairo_destroy" destroy(cr: *Cairo)
+extern "cairo_get_reference_count" get_reference_count(cr: *Cairo) -> uint
+extern "cairo_status" status(cr: *Cairo) -> int
 extern "cairo_status_to_string" status_to_string(status: int) -> *u8
-extern "cairo_save" save(cr: *u8)
-extern "cairo_restore" restore(cr: *u8)
-extern "cairo_get_target" get_target(cr: *u8) -> *u8
-extern "cairo_get_group_target" get_group_target(cr: *u8) -> *u8
+extern "cairo_save" save(cr: *Cairo)
+extern "cairo_restore" restore(cr: *Cairo)
+extern "cairo_get_target" get_target(cr: *Cairo) -> *Surface
+extern "cairo_get_group_target" get_group_target(cr: *Cairo) -> *Surface
 
 // ### Groups
 //
 // A group redirects drawing to an intermediate surface, which `pop_group` hands back as a pattern —
 // the way a composite of several operations is given one opacity, or one mask.
 
-extern "cairo_push_group" push_group(cr: *u8)
-extern "cairo_push_group_with_content" push_group_with_content(cr: *u8, content: int)
-extern "cairo_pop_group" pop_group(cr: *u8) -> *u8
-extern "cairo_pop_group_to_source" pop_group_to_source(cr: *u8)
+extern "cairo_push_group" push_group(cr: *Cairo)
+extern "cairo_push_group_with_content" push_group_with_content(cr: *Cairo, content: int)
+extern "cairo_pop_group" pop_group(cr: *Cairo) -> *Pattern
+extern "cairo_pop_group_to_source" pop_group_to_source(cr: *Cairo)
 
 // ### The source, and the rest of the graphics state
 
-extern "cairo_set_source" set_source(cr: *u8, source: *u8)
-extern "cairo_set_source_rgb" set_source_rgb(cr: *u8, red: real, green: real, blue: real)
-extern "cairo_set_source_rgba" set_source_rgba(cr: *u8, red: real, green: real, blue: real, alpha: real)
-extern "cairo_set_source_surface" set_source_surface(cr: *u8, surface: *u8, x: real, y: real)
-extern "cairo_get_source" get_source(cr: *u8) -> *u8
+extern "cairo_set_source" set_source(cr: *Cairo, source: *Pattern)
+extern "cairo_set_source_rgb" set_source_rgb(cr: *Cairo, red: real, green: real, blue: real)
+extern "cairo_set_source_rgba" set_source_rgba(cr: *Cairo, red: real, green: real, blue: real, alpha: real)
+extern "cairo_set_source_surface" set_source_surface(cr: *Cairo, surface: *Surface, x: real, y: real)
+extern "cairo_get_source" get_source(cr: *Cairo) -> *Pattern
 
-extern "cairo_set_operator" set_operator(cr: *u8, op: int)
-extern "cairo_get_operator" get_operator(cr: *u8) -> int
-extern "cairo_set_tolerance" set_tolerance(cr: *u8, tolerance: real)
-extern "cairo_get_tolerance" get_tolerance(cr: *u8) -> real
-extern "cairo_set_antialias" set_antialias(cr: *u8, antialias: int)
-extern "cairo_get_antialias" get_antialias(cr: *u8) -> int
-extern "cairo_set_fill_rule" set_fill_rule(cr: *u8, fill_rule: int)
-extern "cairo_get_fill_rule" get_fill_rule(cr: *u8) -> int
+extern "cairo_set_operator" set_operator(cr: *Cairo, op: int)
+extern "cairo_get_operator" get_operator(cr: *Cairo) -> int
+extern "cairo_set_tolerance" set_tolerance(cr: *Cairo, tolerance: real)
+extern "cairo_get_tolerance" get_tolerance(cr: *Cairo) -> real
+extern "cairo_set_antialias" set_antialias(cr: *Cairo, antialias: int)
+extern "cairo_get_antialias" get_antialias(cr: *Cairo) -> int
+extern "cairo_set_fill_rule" set_fill_rule(cr: *Cairo, fill_rule: int)
+extern "cairo_get_fill_rule" get_fill_rule(cr: *Cairo) -> int
 
-extern "cairo_set_line_width" set_line_width(cr: *u8, width: real)
-extern "cairo_get_line_width" get_line_width(cr: *u8) -> real
-extern "cairo_set_line_cap" set_line_cap(cr: *u8, line_cap: int)
-extern "cairo_get_line_cap" get_line_cap(cr: *u8) -> int
-extern "cairo_set_line_join" set_line_join(cr: *u8, line_join: int)
-extern "cairo_get_line_join" get_line_join(cr: *u8) -> int
-extern "cairo_set_miter_limit" set_miter_limit(cr: *u8, limit: real)
-extern "cairo_get_miter_limit" get_miter_limit(cr: *u8) -> real
+extern "cairo_set_line_width" set_line_width(cr: *Cairo, width: real)
+extern "cairo_get_line_width" get_line_width(cr: *Cairo) -> real
+extern "cairo_set_line_cap" set_line_cap(cr: *Cairo, line_cap: int)
+extern "cairo_get_line_cap" get_line_cap(cr: *Cairo) -> int
+extern "cairo_set_line_join" set_line_join(cr: *Cairo, line_join: int)
+extern "cairo_get_line_join" get_line_join(cr: *Cairo) -> int
+extern "cairo_set_miter_limit" set_miter_limit(cr: *Cairo, limit: real)
+extern "cairo_get_miter_limit" get_miter_limit(cr: *Cairo) -> real
 
 // The dash pattern is an array of doubles the caller owns; cairo copies it.
-extern "cairo_set_dash" set_dash(cr: *u8, dashes: *real, num_dashes: int, offset: real)
-extern "cairo_get_dash_count" get_dash_count(cr: *u8) -> int
-extern "cairo_get_dash" get_dash(cr: *u8, dashes: *real, offset: *real)
+extern "cairo_set_dash" set_dash(cr: *Cairo, dashes: *real, num_dashes: int, offset: real)
+extern "cairo_get_dash_count" get_dash_count(cr: *Cairo) -> int
+extern "cairo_get_dash" get_dash(cr: *Cairo, dashes: *real, offset: *real)
 
 // ### The transform
 
-extern "cairo_translate" translate(cr: *u8, tx: real, ty: real)
-extern "cairo_scale" scale(cr: *u8, sx: real, sy: real)
-extern "cairo_rotate" rotate(cr: *u8, angle: real)
-extern "cairo_transform" transform(cr: *u8, matrix: *real)
-extern "cairo_set_matrix" set_matrix(cr: *u8, matrix: *real)
-extern "cairo_get_matrix" get_matrix(cr: *u8, matrix: *real)
-extern "cairo_identity_matrix" identity_matrix(cr: *u8)
-extern "cairo_user_to_device" user_to_device(cr: *u8, x: *real, y: *real)
-extern "cairo_user_to_device_distance" user_to_device_distance(cr: *u8, dx: *real, dy: *real)
-extern "cairo_device_to_user" device_to_user(cr: *u8, x: *real, y: *real)
-extern "cairo_device_to_user_distance" device_to_user_distance(cr: *u8, dx: *real, dy: *real)
+extern "cairo_translate" translate(cr: *Cairo, tx: real, ty: real)
+extern "cairo_scale" scale(cr: *Cairo, sx: real, sy: real)
+extern "cairo_rotate" rotate(cr: *Cairo, angle: real)
+extern "cairo_transform" transform(cr: *Cairo, matrix: *real)
+extern "cairo_set_matrix" set_matrix(cr: *Cairo, matrix: *real)
+extern "cairo_get_matrix" get_matrix(cr: *Cairo, matrix: *real)
+extern "cairo_identity_matrix" identity_matrix(cr: *Cairo)
+extern "cairo_user_to_device" user_to_device(cr: *Cairo, x: *real, y: *real)
+extern "cairo_user_to_device_distance" user_to_device_distance(cr: *Cairo, dx: *real, dy: *real)
+extern "cairo_device_to_user" device_to_user(cr: *Cairo, x: *real, y: *real)
+extern "cairo_device_to_user_distance" device_to_user_distance(cr: *Cairo, dx: *real, dy: *real)
 
 // ### Building a path
 
-extern "cairo_new_path" new_path(cr: *u8)
-extern "cairo_new_sub_path" new_sub_path(cr: *u8)
-extern "cairo_close_path" close_path(cr: *u8)
-extern "cairo_move_to" move_to(cr: *u8, x: real, y: real)
-extern "cairo_rel_move_to" rel_move_to(cr: *u8, dx: real, dy: real)
-extern "cairo_line_to" line_to(cr: *u8, x: real, y: real)
-extern "cairo_rel_line_to" rel_line_to(cr: *u8, dx: real, dy: real)
-extern "cairo_curve_to" curve_to(cr: *u8, x1: real, y1: real, x2: real, y2: real, x3: real, y3: real)
-extern "cairo_rel_curve_to" rel_curve_to(cr: *u8, dx1: real, dy1: real, dx2: real, dy2: real, dx3: real, dy3: real)
-extern "cairo_arc" arc(cr: *u8, x: real, y: real, radius: real, angle1: real, angle2: real)
-extern "cairo_arc_negative" arc_negative(cr: *u8, x: real, y: real, radius: real, angle1: real, angle2: real)
-extern "cairo_rectangle" rectangle(cr: *u8, x: real, y: real, width: real, height: real)
-extern "cairo_has_current_point" has_current_point(cr: *u8) -> bool
-extern "cairo_get_current_point" get_current_point(cr: *u8, x: *real, y: *real)
-extern "cairo_path_extents" path_extents(cr: *u8, x1: *real, y1: *real, x2: *real, y2: *real)
+extern "cairo_new_path" new_path(cr: *Cairo)
+extern "cairo_new_sub_path" new_sub_path(cr: *Cairo)
+extern "cairo_close_path" close_path(cr: *Cairo)
+extern "cairo_move_to" move_to(cr: *Cairo, x: real, y: real)
+extern "cairo_rel_move_to" rel_move_to(cr: *Cairo, dx: real, dy: real)
+extern "cairo_line_to" line_to(cr: *Cairo, x: real, y: real)
+extern "cairo_rel_line_to" rel_line_to(cr: *Cairo, dx: real, dy: real)
+extern "cairo_curve_to" curve_to(cr: *Cairo, x1: real, y1: real, x2: real, y2: real, x3: real, y3: real)
+extern "cairo_rel_curve_to" rel_curve_to(cr: *Cairo, dx1: real, dy1: real, dx2: real, dy2: real, dx3: real, dy3: real)
+extern "cairo_arc" arc(cr: *Cairo, x: real, y: real, radius: real, angle1: real, angle2: real)
+extern "cairo_arc_negative" arc_negative(cr: *Cairo, x: real, y: real, radius: real, angle1: real, angle2: real)
+extern "cairo_rectangle" rectangle(cr: *Cairo, x: real, y: real, width: real, height: real)
+extern "cairo_has_current_point" has_current_point(cr: *Cairo) -> bool
+extern "cairo_get_current_point" get_current_point(cr: *Cairo, x: *real, y: *real)
+extern "cairo_path_extents" path_extents(cr: *Cairo, x1: *real, y1: *real, x2: *real, y2: *real)
 
 // ### Painting it
 
-extern "cairo_paint" paint(cr: *u8)
-extern "cairo_paint_with_alpha" paint_with_alpha(cr: *u8, alpha: real)
-extern "cairo_mask" mask(cr: *u8, pattern: *u8)
-extern "cairo_mask_surface" mask_surface(cr: *u8, surface: *u8, surface_x: real, surface_y: real)
-extern "cairo_fill" fill(cr: *u8)
-extern "cairo_fill_preserve" fill_preserve(cr: *u8)
-extern "cairo_fill_extents" fill_extents(cr: *u8, x1: *real, y1: *real, x2: *real, y2: *real)
-extern "cairo_in_fill" in_fill(cr: *u8, x: real, y: real) -> bool
-extern "cairo_stroke" stroke(cr: *u8)
-extern "cairo_stroke_preserve" stroke_preserve(cr: *u8)
-extern "cairo_stroke_extents" stroke_extents(cr: *u8, x1: *real, y1: *real, x2: *real, y2: *real)
-extern "cairo_in_stroke" in_stroke(cr: *u8, x: real, y: real) -> bool
+extern "cairo_paint" paint(cr: *Cairo)
+extern "cairo_paint_with_alpha" paint_with_alpha(cr: *Cairo, alpha: real)
+extern "cairo_mask" mask(cr: *Cairo, pattern: *Pattern)
+extern "cairo_mask_surface" mask_surface(cr: *Cairo, surface: *Surface, surface_x: real, surface_y: real)
+extern "cairo_fill" fill(cr: *Cairo)
+extern "cairo_fill_preserve" fill_preserve(cr: *Cairo)
+extern "cairo_fill_extents" fill_extents(cr: *Cairo, x1: *real, y1: *real, x2: *real, y2: *real)
+extern "cairo_in_fill" in_fill(cr: *Cairo, x: real, y: real) -> bool
+extern "cairo_stroke" stroke(cr: *Cairo)
+extern "cairo_stroke_preserve" stroke_preserve(cr: *Cairo)
+extern "cairo_stroke_extents" stroke_extents(cr: *Cairo, x1: *real, y1: *real, x2: *real, y2: *real)
+extern "cairo_in_stroke" in_stroke(cr: *Cairo, x: real, y: real) -> bool
 
 // ### Clipping
 
-extern "cairo_clip" clip(cr: *u8)
-extern "cairo_clip_preserve" clip_preserve(cr: *u8)
-extern "cairo_reset_clip" reset_clip(cr: *u8)
-extern "cairo_clip_extents" clip_extents(cr: *u8, x1: *real, y1: *real, x2: *real, y2: *real)
-extern "cairo_in_clip" in_clip(cr: *u8, x: real, y: real) -> bool
+extern "cairo_clip" clip(cr: *Cairo)
+extern "cairo_clip_preserve" clip_preserve(cr: *Cairo)
+extern "cairo_reset_clip" reset_clip(cr: *Cairo)
+extern "cairo_clip_extents" clip_extents(cr: *Cairo, x1: *real, y1: *real, x2: *real, y2: *real)
+extern "cairo_in_clip" in_clip(cr: *Cairo, x: real, y: real) -> bool
 
 // ### Pages
 
-extern "cairo_show_page" show_page(cr: *u8)
-extern "cairo_copy_page" copy_page(cr: *u8)
+extern "cairo_show_page" show_page(cr: *Cairo)
+extern "cairo_copy_page" copy_page(cr: *Cairo)
 
 // ## Text — the "toy" API, and the glyph one under it
 //
@@ -148,93 +162,91 @@ extern "cairo_copy_page" copy_page(cr: *u8)
 // shaping: it is enough for a label and not enough for Arabic. `show_glyphs` is the layer beneath,
 // where a shaping engine has already decided which glyph goes where.
 
-extern "cairo_select_font_face" select_font_face(cr: *u8, family: *u8, slant: int, weight: int)
-extern "cairo_set_font_size" set_font_size(cr: *u8, size: real)
-extern "cairo_set_font_matrix" set_font_matrix(cr: *u8, matrix: *real)
-extern "cairo_get_font_matrix" get_font_matrix(cr: *u8, matrix: *real)
-extern "cairo_set_font_options" set_font_options(cr: *u8, options: *u8)
-extern "cairo_get_font_options" get_font_options(cr: *u8, options: *u8)
-extern "cairo_set_font_face" set_font_face(cr: *u8, font_face: *u8)
-extern "cairo_get_font_face" get_font_face(cr: *u8) -> *u8
-extern "cairo_set_scaled_font" set_scaled_font(cr: *u8, scaled_font: *u8)
-extern "cairo_get_scaled_font" get_scaled_font(cr: *u8) -> *u8
-extern "cairo_show_text" show_text(cr: *u8, utf8: *u8)
-extern "cairo_text_path" text_path(cr: *u8, utf8: *u8)
-extern "cairo_text_extents" text_extents(cr: *u8, utf8: *u8, extents: *real)
-extern "cairo_font_extents" font_extents(cr: *u8, extents: *real)
+extern "cairo_select_font_face" select_font_face(cr: *Cairo, family: *u8, slant: int, weight: int)
+extern "cairo_set_font_size" set_font_size(cr: *Cairo, size: real)
+extern "cairo_set_font_matrix" set_font_matrix(cr: *Cairo, matrix: *real)
+extern "cairo_get_font_matrix" get_font_matrix(cr: *Cairo, matrix: *real)
+extern "cairo_set_font_options" set_font_options(cr: *Cairo, options: *FontOptions)
+extern "cairo_get_font_options" get_font_options(cr: *Cairo, options: *FontOptions)
+extern "cairo_set_font_face" set_font_face(cr: *Cairo, font_face: *FontFace)
+extern "cairo_get_font_face" get_font_face(cr: *Cairo) -> *FontFace
+extern "cairo_set_scaled_font" set_scaled_font(cr: *Cairo, scaled_font: *ScaledFont)
+extern "cairo_get_scaled_font" get_scaled_font(cr: *Cairo) -> *ScaledFont
+extern "cairo_show_text" show_text(cr: *Cairo, utf8: *u8)
+extern "cairo_text_path" text_path(cr: *Cairo, utf8: *u8)
+extern "cairo_text_extents" text_extents(cr: *Cairo, utf8: *u8, extents: *real)
+extern "cairo_font_extents" font_extents(cr: *Cairo, extents: *real)
 
 // A glyph is `{ unsigned long index; double x; double y; }` — not homogeneous, so it is passed as a
 // pointer to the caller's own array of the matching sysl struct rather than as a `*real`.
-extern "cairo_show_glyphs" show_glyphs(cr: *u8, glyphs: *u8, num_glyphs: int)
-extern "cairo_glyph_path" glyph_path(cr: *u8, glyphs: *u8, num_glyphs: int)
-extern "cairo_glyph_extents" glyph_extents(cr: *u8, glyphs: *u8, num_glyphs: int, extents: *real)
+extern "cairo_show_glyphs" show_glyphs(cr: *Cairo, glyphs: *u8, num_glyphs: int)
+extern "cairo_glyph_path" glyph_path(cr: *Cairo, glyphs: *u8, num_glyphs: int)
+extern "cairo_glyph_extents" glyph_extents(cr: *Cairo, glyphs: *u8, num_glyphs: int, extents: *real)
 
 // ### Font faces, scaled fonts and font options
-//
-// All three are reference counted the same way a context is.
 
-extern "cairo_font_face_reference" font_face_reference(face: *u8) -> *u8
-extern "cairo_font_face_destroy" font_face_destroy(face: *u8)
-extern "cairo_font_face_status" font_face_status(face: *u8) -> int
-extern "cairo_font_face_get_type" font_face_get_type(face: *u8) -> int
-extern "cairo_font_face_get_reference_count" font_face_get_reference_count(face: *u8) -> uint
+extern "cairo_font_face_reference" font_face_reference(face: *FontFace) -> *FontFace
+extern "cairo_font_face_destroy" font_face_destroy(face: *FontFace)
+extern "cairo_font_face_status" font_face_status(face: *FontFace) -> int
+extern "cairo_font_face_get_type" font_face_get_type(face: *FontFace) -> int
+extern "cairo_font_face_get_reference_count" font_face_get_reference_count(face: *FontFace) -> uint
 
-extern "cairo_scaled_font_create" scaled_font_create(face: *u8, font_matrix: *real, ctm: *real, options: *u8) -> *u8
-extern "cairo_scaled_font_reference" scaled_font_reference(f: *u8) -> *u8
-extern "cairo_scaled_font_destroy" scaled_font_destroy(f: *u8)
-extern "cairo_scaled_font_status" scaled_font_status(f: *u8) -> int
-extern "cairo_scaled_font_extents" scaled_font_extents(f: *u8, extents: *real)
-extern "cairo_scaled_font_text_extents" scaled_font_text_extents(f: *u8, utf8: *u8, extents: *real)
-extern "cairo_scaled_font_get_font_face" scaled_font_get_font_face(f: *u8) -> *u8
+extern "cairo_scaled_font_create" scaled_font_create(face: *FontFace, font_matrix: *real, ctm: *real, options: *FontOptions) -> *ScaledFont
+extern "cairo_scaled_font_reference" scaled_font_reference(f: *ScaledFont) -> *ScaledFont
+extern "cairo_scaled_font_destroy" scaled_font_destroy(f: *ScaledFont)
+extern "cairo_scaled_font_status" scaled_font_status(f: *ScaledFont) -> int
+extern "cairo_scaled_font_extents" scaled_font_extents(f: *ScaledFont, extents: *real)
+extern "cairo_scaled_font_text_extents" scaled_font_text_extents(f: *ScaledFont, utf8: *u8, extents: *real)
+extern "cairo_scaled_font_get_font_face" scaled_font_get_font_face(f: *ScaledFont) -> *FontFace
 
-extern "cairo_font_options_create" font_options_create() -> *u8
-extern "cairo_font_options_copy" font_options_copy(original: *u8) -> *u8
-extern "cairo_font_options_destroy" font_options_destroy(options: *u8)
-extern "cairo_font_options_status" font_options_status(options: *u8) -> int
-extern "cairo_font_options_merge" font_options_merge(options: *u8, other: *u8)
-extern "cairo_font_options_equal" font_options_equal(options: *u8, other: *u8) -> bool
-extern "cairo_font_options_hash" font_options_hash(options: *u8) -> u64
-extern "cairo_font_options_set_antialias" font_options_set_antialias(options: *u8, antialias: int)
-extern "cairo_font_options_get_antialias" font_options_get_antialias(options: *u8) -> int
-extern "cairo_font_options_set_subpixel_order" font_options_set_subpixel_order(options: *u8, order: int)
-extern "cairo_font_options_get_subpixel_order" font_options_get_subpixel_order(options: *u8) -> int
-extern "cairo_font_options_set_hint_style" font_options_set_hint_style(options: *u8, hint_style: int)
-extern "cairo_font_options_get_hint_style" font_options_get_hint_style(options: *u8) -> int
-extern "cairo_font_options_set_hint_metrics" font_options_set_hint_metrics(options: *u8, hint_metrics: int)
-extern "cairo_font_options_get_hint_metrics" font_options_get_hint_metrics(options: *u8) -> int
+extern "cairo_font_options_create" font_options_create() -> *FontOptions
+extern "cairo_font_options_copy" font_options_copy(original: *FontOptions) -> *FontOptions
+extern "cairo_font_options_destroy" font_options_destroy(options: *FontOptions)
+extern "cairo_font_options_status" font_options_status(options: *FontOptions) -> int
+extern "cairo_font_options_merge" font_options_merge(options: *FontOptions, other: *FontOptions)
+extern "cairo_font_options_equal" font_options_equal(options: *FontOptions, other: *FontOptions) -> bool
+extern "cairo_font_options_hash" font_options_hash(options: *FontOptions) -> u64
+extern "cairo_font_options_set_antialias" font_options_set_antialias(options: *FontOptions, antialias: int)
+extern "cairo_font_options_get_antialias" font_options_get_antialias(options: *FontOptions) -> int
+extern "cairo_font_options_set_subpixel_order" font_options_set_subpixel_order(options: *FontOptions, order: int)
+extern "cairo_font_options_get_subpixel_order" font_options_get_subpixel_order(options: *FontOptions) -> int
+extern "cairo_font_options_set_hint_style" font_options_set_hint_style(options: *FontOptions, hint_style: int)
+extern "cairo_font_options_get_hint_style" font_options_get_hint_style(options: *FontOptions) -> int
+extern "cairo_font_options_set_hint_metrics" font_options_set_hint_metrics(options: *FontOptions, hint_metrics: int)
+extern "cairo_font_options_get_hint_metrics" font_options_get_hint_metrics(options: *FontOptions) -> int
 
 // ## Surfaces — `cairo_surface_t`
 
-extern "cairo_surface_reference" surface_reference(surface: *u8) -> *u8
-extern "cairo_surface_destroy" surface_destroy(surface: *u8)
-extern "cairo_surface_status" surface_status(surface: *u8) -> int
-extern "cairo_surface_finish" surface_finish(surface: *u8)
-extern "cairo_surface_flush" surface_flush(surface: *u8)
-extern "cairo_surface_mark_dirty" surface_mark_dirty(surface: *u8)
-extern "cairo_surface_mark_dirty_rectangle" surface_mark_dirty_rectangle(surface: *u8, x: int, y: int, width: int, height: int)
-extern "cairo_surface_get_type" surface_get_type(surface: *u8) -> int
-extern "cairo_surface_get_content" surface_get_content(surface: *u8) -> int
-extern "cairo_surface_get_reference_count" surface_get_reference_count(surface: *u8) -> uint
-extern "cairo_surface_create_similar" surface_create_similar(other: *u8, content: int, width: int, height: int) -> *u8
-extern "cairo_surface_create_similar_image" surface_create_similar_image(other: *u8, format: int, width: int, height: int) -> *u8
-extern "cairo_surface_create_for_rectangle" surface_create_for_rectangle(target: *u8, x: real, y: real, width: real, height: real) -> *u8
-extern "cairo_surface_set_device_offset" surface_set_device_offset(surface: *u8, x: real, y: real)
-extern "cairo_surface_get_device_offset" surface_get_device_offset(surface: *u8, x: *real, y: *real)
-extern "cairo_surface_set_device_scale" surface_set_device_scale(surface: *u8, x: real, y: real)
-extern "cairo_surface_get_device_scale" surface_get_device_scale(surface: *u8, x: *real, y: *real)
-extern "cairo_surface_show_page" surface_show_page(surface: *u8)
-extern "cairo_surface_copy_page" surface_copy_page(surface: *u8)
+extern "cairo_surface_reference" surface_reference(surface: *Surface) -> *Surface
+extern "cairo_surface_destroy" surface_destroy(surface: *Surface)
+extern "cairo_surface_status" surface_status(surface: *Surface) -> int
+extern "cairo_surface_finish" surface_finish(surface: *Surface)
+extern "cairo_surface_flush" surface_flush(surface: *Surface)
+extern "cairo_surface_mark_dirty" surface_mark_dirty(surface: *Surface)
+extern "cairo_surface_mark_dirty_rectangle" surface_mark_dirty_rectangle(surface: *Surface, x: int, y: int, width: int, height: int)
+extern "cairo_surface_get_type" surface_get_type(surface: *Surface) -> int
+extern "cairo_surface_get_content" surface_get_content(surface: *Surface) -> int
+extern "cairo_surface_get_reference_count" surface_get_reference_count(surface: *Surface) -> uint
+extern "cairo_surface_create_similar" surface_create_similar(other: *Surface, content: int, width: int, height: int) -> *Surface
+extern "cairo_surface_create_similar_image" surface_create_similar_image(other: *Surface, format: int, width: int, height: int) -> *Surface
+extern "cairo_surface_create_for_rectangle" surface_create_for_rectangle(target: *Surface, x: real, y: real, width: real, height: real) -> *Surface
+extern "cairo_surface_set_device_offset" surface_set_device_offset(surface: *Surface, x: real, y: real)
+extern "cairo_surface_get_device_offset" surface_get_device_offset(surface: *Surface, x: *real, y: *real)
+extern "cairo_surface_set_device_scale" surface_set_device_scale(surface: *Surface, x: real, y: real)
+extern "cairo_surface_get_device_scale" surface_get_device_scale(surface: *Surface, x: *real, y: *real)
+extern "cairo_surface_show_page" surface_show_page(surface: *Surface)
+extern "cairo_surface_copy_page" surface_copy_page(surface: *Surface)
 
 // ### Image surfaces — pixels in memory
 
-extern "cairo_image_surface_create" image_surface_create(format: int, width: int, height: int) -> *u8
-extern "cairo_image_surface_create_for_data" image_surface_create_for_data(data: *u8, format: int, width: int, height: int, stride: int) -> *u8
+extern "cairo_image_surface_create" image_surface_create(format: int, width: int, height: int) -> *Surface
+extern "cairo_image_surface_create_for_data" image_surface_create_for_data(data: *u8, format: int, width: int, height: int, stride: int) -> *Surface
 extern "cairo_format_stride_for_width" format_stride_for_width(format: int, width: int) -> int
-extern "cairo_image_surface_get_data" image_surface_get_data(surface: *u8) -> *u8
-extern "cairo_image_surface_get_format" image_surface_get_format(surface: *u8) -> int
-extern "cairo_image_surface_get_width" image_surface_get_width(surface: *u8) -> int
-extern "cairo_image_surface_get_height" image_surface_get_height(surface: *u8) -> int
-extern "cairo_image_surface_get_stride" image_surface_get_stride(surface: *u8) -> int
+extern "cairo_image_surface_get_data" image_surface_get_data(surface: *Surface) -> *u8
+extern "cairo_image_surface_get_format" image_surface_get_format(surface: *Surface) -> int
+extern "cairo_image_surface_get_width" image_surface_get_width(surface: *Surface) -> int
+extern "cairo_image_surface_get_height" image_surface_get_height(surface: *Surface) -> int
+extern "cairo_image_surface_get_stride" image_surface_get_stride(surface: *Surface) -> int
 
 // ### PNG
 //
@@ -242,68 +254,68 @@ extern "cairo_image_surface_get_stride" image_surface_get_stride(surface: *u8) -
 // `closure` pointer it passes straight back — which is how a PNG is encoded into memory rather than
 // onto disk.
 
-extern "cairo_surface_write_to_png" surface_write_to_png(surface: *u8, filename: *u8) -> int
-extern "cairo_image_surface_create_from_png" image_surface_create_from_png(filename: *u8) -> *u8
-extern "cairo_surface_write_to_png_stream" surface_write_to_png_stream(surface: *u8, write_func: *extern (*u8, *u8, uint) -> int, closure: *u8) -> int
-extern "cairo_image_surface_create_from_png_stream" image_surface_create_from_png_stream(read_func: *extern (*u8, *u8, uint) -> int, closure: *u8) -> *u8
+extern "cairo_surface_write_to_png" surface_write_to_png(surface: *Surface, filename: *u8) -> int
+extern "cairo_image_surface_create_from_png" image_surface_create_from_png(filename: *u8) -> *Surface
+extern "cairo_surface_write_to_png_stream" surface_write_to_png_stream(surface: *Surface, write_func: *extern (*u8, *u8, uint) -> int, closure: *u8) -> int
+extern "cairo_image_surface_create_from_png_stream" image_surface_create_from_png_stream(read_func: *extern (*u8, *u8, uint) -> int, closure: *u8) -> *Surface
 
 // ### The vector backends
 //
 // PDF, SVG and PostScript are compiled into libcairo itself, so they need no second library on the
 // link line and are part of this package rather than a companion to it.
 
-extern "cairo_pdf_surface_create" pdf_surface_create(filename: *u8, width_in_points: real, height_in_points: real) -> *u8
-extern "cairo_pdf_surface_restrict_to_version" pdf_surface_restrict_to_version(surface: *u8, version: int)
+extern "cairo_pdf_surface_create" pdf_surface_create(filename: *u8, width_in_points: real, height_in_points: real) -> *Surface
+extern "cairo_pdf_surface_restrict_to_version" pdf_surface_restrict_to_version(surface: *Surface, version: int)
 extern "cairo_pdf_version_to_string" pdf_version_to_string(version: int) -> *u8
-extern "cairo_pdf_surface_set_size" pdf_surface_set_size(surface: *u8, width_in_points: real, height_in_points: real)
-extern "cairo_pdf_surface_add_outline" pdf_surface_add_outline(surface: *u8, parent_id: int, utf8: *u8, link_attribs: *u8, flags: int) -> int
-extern "cairo_pdf_surface_set_metadata" pdf_surface_set_metadata(surface: *u8, metadata: int, utf8: *u8)
-extern "cairo_pdf_surface_set_custom_metadata" pdf_surface_set_custom_metadata(surface: *u8, name: *u8, value: *u8)
-extern "cairo_pdf_surface_set_page_label" pdf_surface_set_page_label(surface: *u8, utf8: *u8)
-extern "cairo_pdf_surface_set_thumbnail_size" pdf_surface_set_thumbnail_size(surface: *u8, width: int, height: int)
+extern "cairo_pdf_surface_set_size" pdf_surface_set_size(surface: *Surface, width_in_points: real, height_in_points: real)
+extern "cairo_pdf_surface_add_outline" pdf_surface_add_outline(surface: *Surface, parent_id: int, utf8: *u8, link_attribs: *u8, flags: int) -> int
+extern "cairo_pdf_surface_set_metadata" pdf_surface_set_metadata(surface: *Surface, metadata: int, utf8: *u8)
+extern "cairo_pdf_surface_set_custom_metadata" pdf_surface_set_custom_metadata(surface: *Surface, name: *u8, value: *u8)
+extern "cairo_pdf_surface_set_page_label" pdf_surface_set_page_label(surface: *Surface, utf8: *u8)
+extern "cairo_pdf_surface_set_thumbnail_size" pdf_surface_set_thumbnail_size(surface: *Surface, width: int, height: int)
 
-extern "cairo_svg_surface_create" svg_surface_create(filename: *u8, width_in_points: real, height_in_points: real) -> *u8
-extern "cairo_svg_surface_restrict_to_version" svg_surface_restrict_to_version(surface: *u8, version: int)
+extern "cairo_svg_surface_create" svg_surface_create(filename: *u8, width_in_points: real, height_in_points: real) -> *Surface
+extern "cairo_svg_surface_restrict_to_version" svg_surface_restrict_to_version(surface: *Surface, version: int)
 extern "cairo_svg_version_to_string" svg_version_to_string(version: int) -> *u8
 
-extern "cairo_ps_surface_create" ps_surface_create(filename: *u8, width_in_points: real, height_in_points: real) -> *u8
-extern "cairo_ps_surface_set_size" ps_surface_set_size(surface: *u8, width_in_points: real, height_in_points: real)
-extern "cairo_ps_surface_dsc_comment" ps_surface_dsc_comment(surface: *u8, comment: *u8)
-extern "cairo_ps_surface_set_eps" ps_surface_set_eps(surface: *u8, eps: bool)
+extern "cairo_ps_surface_create" ps_surface_create(filename: *u8, width_in_points: real, height_in_points: real) -> *Surface
+extern "cairo_ps_surface_set_size" ps_surface_set_size(surface: *Surface, width_in_points: real, height_in_points: real)
+extern "cairo_ps_surface_dsc_comment" ps_surface_dsc_comment(surface: *Surface, comment: *u8)
+extern "cairo_ps_surface_set_eps" ps_surface_set_eps(surface: *Surface, eps: bool)
 
 // ### Recording surfaces
 //
 // A recording surface keeps the operations rather than pixels, so the same drawing is replayed into
 // a PNG at one resolution and into a PDF at another.
 
-extern "cairo_recording_surface_create" recording_surface_create(content: int, extents: *real) -> *u8
-extern "cairo_recording_surface_ink_extents" recording_surface_ink_extents(surface: *u8, x0: *real, y0: *real, width: *real, height: *real)
+extern "cairo_recording_surface_create" recording_surface_create(content: int, extents: *real) -> *Surface
+extern "cairo_recording_surface_ink_extents" recording_surface_ink_extents(surface: *Surface, x0: *real, y0: *real, width: *real, height: *real)
 
 // ### Tagged output — PDF logical structure, links and destinations
 
-extern "cairo_tag_begin" tag_begin(cr: *u8, tag_name: *u8, attributes: *u8)
-extern "cairo_tag_end" tag_end(cr: *u8, tag_name: *u8)
+extern "cairo_tag_begin" tag_begin(cr: *Cairo, tag_name: *u8, attributes: *u8)
+extern "cairo_tag_end" tag_end(cr: *Cairo, tag_name: *u8)
 
 // ## Patterns — `cairo_pattern_t`
 
-extern "cairo_pattern_create_rgb" pattern_create_rgb(red: real, green: real, blue: real) -> *u8
-extern "cairo_pattern_create_rgba" pattern_create_rgba(red: real, green: real, blue: real, alpha: real) -> *u8
-extern "cairo_pattern_create_for_surface" pattern_create_for_surface(surface: *u8) -> *u8
-extern "cairo_pattern_create_linear" pattern_create_linear(x0: real, y0: real, x1: real, y1: real) -> *u8
-extern "cairo_pattern_create_radial" pattern_create_radial(cx0: real, cy0: real, radius0: real, cx1: real, cy1: real, radius1: real) -> *u8
-extern "cairo_pattern_reference" pattern_reference(pattern: *u8) -> *u8
-extern "cairo_pattern_destroy" pattern_destroy(pattern: *u8)
-extern "cairo_pattern_status" pattern_status(pattern: *u8) -> int
-extern "cairo_pattern_get_type" pattern_get_type(pattern: *u8) -> int
-extern "cairo_pattern_add_color_stop_rgb" pattern_add_color_stop_rgb(pattern: *u8, offset: real, red: real, green: real, blue: real)
-extern "cairo_pattern_add_color_stop_rgba" pattern_add_color_stop_rgba(pattern: *u8, offset: real, red: real, green: real, blue: real, alpha: real)
-extern "cairo_pattern_get_color_stop_count" pattern_get_color_stop_count(pattern: *u8, count: *int) -> int
-extern "cairo_pattern_set_extend" pattern_set_extend(pattern: *u8, extend: int)
-extern "cairo_pattern_get_extend" pattern_get_extend(pattern: *u8) -> int
-extern "cairo_pattern_set_filter" pattern_set_filter(pattern: *u8, filter: int)
-extern "cairo_pattern_get_filter" pattern_get_filter(pattern: *u8) -> int
-extern "cairo_pattern_set_matrix" pattern_set_matrix(pattern: *u8, matrix: *real)
-extern "cairo_pattern_get_matrix" pattern_get_matrix(pattern: *u8, matrix: *real)
+extern "cairo_pattern_create_rgb" pattern_create_rgb(red: real, green: real, blue: real) -> *Pattern
+extern "cairo_pattern_create_rgba" pattern_create_rgba(red: real, green: real, blue: real, alpha: real) -> *Pattern
+extern "cairo_pattern_create_for_surface" pattern_create_for_surface(surface: *Surface) -> *Pattern
+extern "cairo_pattern_create_linear" pattern_create_linear(x0: real, y0: real, x1: real, y1: real) -> *Pattern
+extern "cairo_pattern_create_radial" pattern_create_radial(cx0: real, cy0: real, radius0: real, cx1: real, cy1: real, radius1: real) -> *Pattern
+extern "cairo_pattern_reference" pattern_reference(pattern: *Pattern) -> *Pattern
+extern "cairo_pattern_destroy" pattern_destroy(pattern: *Pattern)
+extern "cairo_pattern_status" pattern_status(pattern: *Pattern) -> int
+extern "cairo_pattern_get_type" pattern_get_type(pattern: *Pattern) -> int
+extern "cairo_pattern_add_color_stop_rgb" pattern_add_color_stop_rgb(pattern: *Pattern, offset: real, red: real, green: real, blue: real)
+extern "cairo_pattern_add_color_stop_rgba" pattern_add_color_stop_rgba(pattern: *Pattern, offset: real, red: real, green: real, blue: real, alpha: real)
+extern "cairo_pattern_get_color_stop_count" pattern_get_color_stop_count(pattern: *Pattern, count: *int) -> int
+extern "cairo_pattern_set_extend" pattern_set_extend(pattern: *Pattern, extend: int)
+extern "cairo_pattern_get_extend" pattern_get_extend(pattern: *Pattern) -> int
+extern "cairo_pattern_set_filter" pattern_set_filter(pattern: *Pattern, filter: int)
+extern "cairo_pattern_get_filter" pattern_get_filter(pattern: *Pattern) -> int
+extern "cairo_pattern_set_matrix" pattern_set_matrix(pattern: *Pattern, matrix: *real)
+extern "cairo_pattern_get_matrix" pattern_get_matrix(pattern: *Pattern, matrix: *real)
 
 // ## Matrices — `cairo_matrix_t`
 //
