@@ -35,7 +35,7 @@ package {
 // them, so a freestanding target has nothing for it to run on, and saying so here turns "this will
 // not link" into one clean refusal before anything is compiled.
 //
-// `alloc` is honest rather than defensive: cairo mallocs its surfaces, its paths and its glyph
+// `heap` is honest rather than defensive: cairo mallocs its surfaces, its paths and its glyph
 // caches, and unlike QOI it has no allocator hook to point somewhere else. `image_surface_for_data`
 // keeps the *pixels* out of the heap, which is the large allocation, but the surface object itself
 // still allocates.
@@ -45,5 +45,5 @@ package {
 // not about features.
 requires {
   os    = true
-  alloc = true
+  heap  = true
 }
