@@ -10,25 +10,26 @@
 // arrived against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       cairo { git = "github.com/sysl-lang/cairo", version = "0.2.0" }
+//       cairo { git = "github.com/sysl-lang/cairo", version = "0.3.0" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
-// tag `v0.2.0` on this repository.
+// tag `v0.3.0` on this repository.
 //
-// Cairo itself has to be installed, and its headers do **not** have to be:
+// Cairo has to be installed, **and so do its headers**:
 //
 //     brew install cairo                 # macOS
 //     sudo apt install libcairo2-dev     # Debian / Ubuntu
 //
-// There is no shim, so no C is compiled here and no header is read — only the linker needs to find
-// the library. On a Homebrew machine that is one flag:
+// The headers are read because `sh.sysl.cairo.c` asks the C compiler for cairo's own constants
+// rather than transcribing them. There is still no shim and no `.c` file here. On a Homebrew machine
+// that is two flags, one for each end:
 //
-//     sysl build . --link-path /opt/homebrew/lib
+//     sysl build . --link-path /opt/homebrew/lib --include-path cairo=/opt/homebrew/include/cairo
 
 package {
   name    = "cairo"
-  version = "0.2.0"
+  version = "0.3.0"
 }
 
 // Cairo is a hosted library. It opens files — a PNG, a PDF, an SVG — and reaches the C runtime for
@@ -46,4 +47,11 @@ package {
 requires {
   os    = true
   heap  = true
+
+  // A `headers { cairo = "…" }` block belongs here, so that forgetting the include path is refused
+  // with a sentence rather than with clang's "'cairo.h' file not found" — a header the caller never
+  // wrote. It is **left out until the compiler carries the fix for `sysl test`**, because the two
+  // features currently contradict each other: the requirement is satisfied only by
+  // `--include-path cairo=<dir>`, and `sysl test` drops that flag before asking the C compiler for a
+  // `c const` block. Declaring it today would mean this package could not run its own tests at all.
 }

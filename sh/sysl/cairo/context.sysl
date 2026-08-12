@@ -10,141 +10,141 @@
 
 module sh.sysl.cairo
 
-import sh.sysl.cairo.externs
+import sh.sysl.cairo.c
 import sysl.text.cstring
 import sysl.slices.as_ptr
 
 // Draws on a `Surface`. Made with `context`, and released when the last reference goes.
 struct Context
-    handle: *externs.Cairo
+    handle: *c.Cairo
 
     // What has gone wrong, if anything. **Sticky** — the first failure is kept, and every drawing
     // call afterwards does nothing, so one check at the end of a page is enough.
-    status(&self) -> Status = Status.of(externs.status(self.handle))
+    status(&self) -> Status = Status.of(c.status(self.handle))
 
     ok(&self) -> bool = self.status().ok()
 
     // How many references cairo is holding, which is not the same number as sysl's.
-    reference_count(&self) -> uint = externs.get_reference_count(self.handle)
+    reference_count(&self) -> uint = c.get_reference_count(self.handle)
 
     // The surface this context draws on.
     //
     // **Cairo lends this rather than giving it**, so a reference is taken before it is wrapped and
     // what comes back owns a share like any other `&Surface`. Without that, the `Drop` below would
     // release a surface the context is still drawing on.
-    target(&self) -> &Surface = Surface(externs.surface_reference(externs.get_target(self.handle)))
+    target(&self) -> &Surface = Surface(c.surface_reference(c.get_target(self.handle)))
 
     // ---- the graphics state ----
 
     // Push the whole graphics state, and pop it again. The path is *not* part of it.
-    save(&self) = externs.save(self.handle)
-    restore(&self) = externs.restore(self.handle)
+    save(&self) = c.save(self.handle)
+    restore(&self) = c.restore(self.handle)
 
     // Redirect drawing to an intermediate surface, which `pop_group` hands back as a pattern and
     // `pop_group_to_source` installs directly. This is how several operations are given one opacity.
-    push_group(&self) = externs.push_group(self.handle)
+    push_group(&self) = c.push_group(self.handle)
     push_group_with_content(&self, content: Content) =
-        externs.push_group_with_content(self.handle, content.code())
+        c.push_group_with_content(self.handle, content.code())
 
     // Cairo *gives* this one — it is a fresh reference, so nothing extra is taken here.
-    pop_group(&self) -> &Pattern = Pattern(externs.pop_group(self.handle))
-    pop_group_to_source(&self) = externs.pop_group_to_source(self.handle)
+    pop_group(&self) -> &Pattern = Pattern(c.pop_group(self.handle))
+    pop_group_to_source(&self) = c.pop_group_to_source(self.handle)
 
     // The surface the group is being drawn onto, or the target where there is no group. Lent, so
     // referenced before wrapping.
     group_target(&self) -> &Surface =
-        Surface(externs.surface_reference(externs.get_group_target(self.handle)))
+        Surface(c.surface_reference(c.get_group_target(self.handle)))
 
     // ---- the source ----
 
     // What gets painted: a flat colour, or a pattern. Channels run 0 to 1 and are clamped.
     set_source_rgb(&self, red: real, green: real, blue: real) =
-        externs.set_source_rgb(self.handle, red, green, blue)
+        c.set_source_rgb(self.handle, red, green, blue)
 
     set_source_rgba(&self, red: real, green: real, blue: real, alpha: real) =
-        externs.set_source_rgba(self.handle, red, green, blue, alpha)
+        c.set_source_rgba(self.handle, red, green, blue, alpha)
 
-    set_source(&self, source: &Pattern) = externs.set_source(self.handle, source.handle)
+    set_source(&self, source: &Pattern) = c.set_source(self.handle, source.handle)
 
     // Another surface as the source, with its origin at `(x, y)` in the current user space.
     set_source_surface(&self, surface: &Surface, x: real, y: real) =
-        externs.set_source_surface(self.handle, surface.handle, x, y)
+        c.set_source_surface(self.handle, surface.handle, x, y)
 
     // The current source. Lent, so referenced before wrapping.
-    source(&self) -> &Pattern = Pattern(externs.pattern_reference(externs.get_source(self.handle)))
+    source(&self) -> &Pattern = Pattern(c.pattern_reference(c.get_source(self.handle)))
 
     // ---- the rest of the state ----
 
-    set_operator(&self, op: Operator) = externs.set_operator(self.handle, op.code())
-    operator(&self) -> Operator = Operator.of(externs.get_operator(self.handle))
+    set_operator(&self, op: Operator) = c.set_operator(self.handle, op.code())
+    operator(&self) -> Operator = Operator.of(c.get_operator(self.handle))
 
-    set_antialias(&self, antialias: Antialias) = externs.set_antialias(self.handle, antialias.code())
-    antialias(&self) -> Antialias = Antialias.of(externs.get_antialias(self.handle))
+    set_antialias(&self, antialias: Antialias) = c.set_antialias(self.handle, antialias.code())
+    antialias(&self) -> Antialias = Antialias.of(c.get_antialias(self.handle))
 
-    set_fill_rule(&self, rule: FillRule) = externs.set_fill_rule(self.handle, rule.code())
-    fill_rule(&self) -> FillRule = FillRule.of(externs.get_fill_rule(self.handle))
+    set_fill_rule(&self, rule: FillRule) = c.set_fill_rule(self.handle, rule.code())
+    fill_rule(&self) -> FillRule = FillRule.of(c.get_fill_rule(self.handle))
 
     // How finely curves are flattened, in device units. Larger is faster and coarser; the default
     // is 0.1, and anything below about 0.05 is wasted.
-    set_tolerance(&self, tolerance: real) = externs.set_tolerance(self.handle, tolerance)
-    tolerance(&self) -> real = externs.get_tolerance(self.handle)
+    set_tolerance(&self, tolerance: real) = c.set_tolerance(self.handle, tolerance)
+    tolerance(&self) -> real = c.get_tolerance(self.handle)
 
-    set_line_width(&self, width: real) = externs.set_line_width(self.handle, width)
-    line_width(&self) -> real = externs.get_line_width(self.handle)
+    set_line_width(&self, width: real) = c.set_line_width(self.handle, width)
+    line_width(&self) -> real = c.get_line_width(self.handle)
 
-    set_line_cap(&self, cap: LineCap) = externs.set_line_cap(self.handle, cap.code())
-    line_cap(&self) -> LineCap = LineCap.of(externs.get_line_cap(self.handle))
+    set_line_cap(&self, cap: LineCap) = c.set_line_cap(self.handle, cap.code())
+    line_cap(&self) -> LineCap = LineCap.of(c.get_line_cap(self.handle))
 
-    set_line_join(&self, join: LineJoin) = externs.set_line_join(self.handle, join.code())
-    line_join(&self) -> LineJoin = LineJoin.of(externs.get_line_join(self.handle))
+    set_line_join(&self, join: LineJoin) = c.set_line_join(self.handle, join.code())
+    line_join(&self) -> LineJoin = LineJoin.of(c.get_line_join(self.handle))
 
     // Where a mitred join gives up and becomes a bevel, as a ratio of the miter length to the line
     // width. The default is 10, which turns over at about 11 degrees.
-    set_miter_limit(&self, limit: real) = externs.set_miter_limit(self.handle, limit)
-    miter_limit(&self) -> real = externs.get_miter_limit(self.handle)
+    set_miter_limit(&self, limit: real) = c.set_miter_limit(self.handle, limit)
+    miter_limit(&self) -> real = c.get_miter_limit(self.handle)
 
     // The dash pattern: alternating on and off lengths, starting `offset` into the sequence. An
     // empty slice draws solid, and a slice of one value dashes evenly.
     set_dash(&self, dashes: []const real, offset: real) =
-        externs.set_dash(self.handle, as_ptr(dashes), int(dashes.len), offset)
+        c.set_dash(self.handle, as_ptr(dashes), int(dashes.len), offset)
 
-    dash_count(&self) -> int = externs.get_dash_count(self.handle)
+    dash_count(&self) -> int = c.get_dash_count(self.handle)
 
     // ---- the transform ----
 
-    translate(&self, tx: real, ty: real) = externs.translate(self.handle, tx, ty)
-    scale(&self, sx: real, sy: real) = externs.scale(self.handle, sx, sy)
-    rotate(&self, radians: real) = externs.rotate(self.handle, radians)
+    translate(&self, tx: real, ty: real) = c.translate(self.handle, tx, ty)
+    scale(&self, sx: real, sy: real) = c.scale(self.handle, sx, sy)
+    rotate(&self, radians: real) = c.rotate(self.handle, radians)
 
     // Apply a matrix on top of the current transform, or replace it outright.
     transform(&self, matrix: Matrix)
         var m = matrix
 
-        externs.transform(self.handle, m.ptr())
+        c.transform(self.handle, m.ptr())
     end transform
 
     set_matrix(&self, matrix: Matrix)
         var m = matrix
 
-        externs.set_matrix(self.handle, m.ptr())
+        c.set_matrix(self.handle, m.ptr())
     end set_matrix
 
     matrix(&self) -> Matrix
         var m = identity()
 
-        externs.get_matrix(self.handle, m.ptr())
+        c.get_matrix(self.handle, m.ptr())
         m
     end matrix
 
     // Throw the transform away, so user space is device space again.
-    identity_matrix(&self) = externs.identity_matrix(self.handle)
+    identity_matrix(&self) = c.identity_matrix(self.handle)
 
     // Move a point or a vector between the two spaces. A *distance* ignores the translation.
     user_to_device(&self, x: real, y: real) -> (real, real)
         var px = x
         var py = y
 
-        externs.user_to_device(self.handle, &px, &py)
+        c.user_to_device(self.handle, &px, &py)
         (px, py)
     end user_to_device
 
@@ -152,7 +152,7 @@ struct Context
         var px = dx
         var py = dy
 
-        externs.user_to_device_distance(self.handle, &px, &py)
+        c.user_to_device_distance(self.handle, &px, &py)
         (px, py)
     end user_to_device_distance
 
@@ -160,7 +160,7 @@ struct Context
         var px = x
         var py = y
 
-        externs.device_to_user(self.handle, &px, &py)
+        c.device_to_user(self.handle, &px, &py)
         (px, py)
     end device_to_user
 
@@ -168,7 +168,7 @@ struct Context
         var px = dx
         var py = dy
 
-        externs.device_to_user_distance(self.handle, &px, &py)
+        c.device_to_user_distance(self.handle, &px, &py)
         (px, py)
     end device_to_user_distance
 
@@ -176,52 +176,52 @@ struct Context
 
     // Throw the current path away. `new_sub_path` keeps it but starts a fresh piece, which is what
     // an `arc` wants in front of it so that no line is drawn to where the arc begins.
-    new_path(&self) = externs.new_path(self.handle)
-    new_sub_path(&self) = externs.new_sub_path(self.handle)
+    new_path(&self) = c.new_path(self.handle)
+    new_sub_path(&self) = c.new_sub_path(self.handle)
 
     // Join the current point back to where this piece of the path started.
-    close_path(&self) = externs.close_path(self.handle)
+    close_path(&self) = c.close_path(self.handle)
 
-    move_to(&self, x: real, y: real) = externs.move_to(self.handle, x, y)
-    rel_move_to(&self, dx: real, dy: real) = externs.rel_move_to(self.handle, dx, dy)
-    line_to(&self, x: real, y: real) = externs.line_to(self.handle, x, y)
-    rel_line_to(&self, dx: real, dy: real) = externs.rel_line_to(self.handle, dx, dy)
+    move_to(&self, x: real, y: real) = c.move_to(self.handle, x, y)
+    rel_move_to(&self, dx: real, dy: real) = c.rel_move_to(self.handle, dx, dy)
+    line_to(&self, x: real, y: real) = c.line_to(self.handle, x, y)
+    rel_line_to(&self, dx: real, dy: real) = c.rel_line_to(self.handle, dx, dy)
 
     // A cubic Bézier: two control points and an end point.
     curve_to(&self, x1: real, y1: real, x2: real, y2: real, x3: real, y3: real) =
-        externs.curve_to(self.handle, x1, y1, x2, y2, x3, y3)
+        c.curve_to(self.handle, x1, y1, x2, y2, x3, y3)
 
     rel_curve_to(&self, dx1: real, dy1: real, dx2: real, dy2: real, dx3: real, dy3: real) =
-        externs.rel_curve_to(self.handle, dx1, dy1, dx2, dy2, dx3, dy3)
+        c.rel_curve_to(self.handle, dx1, dy1, dx2, dy2, dx3, dy3)
 
     // An arc of a circle, `angle1` to `angle2` in radians, measured from the positive x axis and
     // increasing **clockwise** on a surface whose y axis points down — which is cairo's default.
     // `arc` sweeps in increasing angles and `arc_negative` in decreasing ones.
     arc(&self, x: real, y: real, radius: real, angle1: real, angle2: real) =
-        externs.arc(self.handle, x, y, radius, angle1, angle2)
+        c.arc(self.handle, x, y, radius, angle1, angle2)
 
     arc_negative(&self, x: real, y: real, radius: real, angle1: real, angle2: real) =
-        externs.arc_negative(self.handle, x, y, radius, angle1, angle2)
+        c.arc_negative(self.handle, x, y, radius, angle1, angle2)
 
     // A closed rectangle, as its own piece of the path.
     rectangle(&self, x: real, y: real, width: real, height: real) =
-        externs.rectangle(self.handle, x, y, width, height)
+        c.rectangle(self.handle, x, y, width, height)
 
     // The outlines of some text, added to the path rather than painted — which is how text is
     // stroked, or filled with a gradient.
     text_path(&self, text: string)
         var t = cstring(text)
 
-        externs.text_path(self.handle, t.ptr)
+        c.text_path(self.handle, t.ptr)
     end text_path
 
-    has_current_point(&self) -> bool = externs.has_current_point(self.handle)
+    has_current_point(&self) -> bool = c.has_current_point(self.handle)
 
     current_point(&self) -> (real, real)
         var x = 0.0
         var y = 0.0
 
-        externs.get_current_point(self.handle, &x, &y)
+        c.get_current_point(self.handle, &x, &y)
         (x, y)
     end current_point
 
@@ -232,31 +232,31 @@ struct Context
         var x2 = 0.0
         var y2 = 0.0
 
-        externs.path_extents(self.handle, &x1, &y1, &x2, &y2)
+        c.path_extents(self.handle, &x1, &y1, &x2, &y2)
         (x1, y1, x2, y2)
     end path_extents
 
     // ---- painting ----
 
     // Paint the source everywhere inside the clip, ignoring the path.
-    paint(&self) = externs.paint(self.handle)
+    paint(&self) = c.paint(self.handle)
 
     // The same, faded — the way a whole group is made translucent.
-    paint_with_alpha(&self, alpha: real) = externs.paint_with_alpha(self.handle, alpha)
+    paint_with_alpha(&self, alpha: real) = c.paint_with_alpha(self.handle, alpha)
 
     // Paint the source through a mask, which supplies the alpha at every point.
-    mask(&self, pattern: &Pattern) = externs.mask(self.handle, pattern.handle)
+    mask(&self, pattern: &Pattern) = c.mask(self.handle, pattern.handle)
     mask_surface(&self, surface: &Surface, x: real, y: real) =
-        externs.mask_surface(self.handle, surface.handle, x, y)
+        c.mask_surface(self.handle, surface.handle, x, y)
 
     // Fill the current path, and clear it. `fill_preserve` keeps it, so the same shape is filled and
     // then stroked without being described twice.
-    fill(&self) = externs.fill(self.handle)
-    fill_preserve(&self) = externs.fill_preserve(self.handle)
+    fill(&self) = c.fill(self.handle)
+    fill_preserve(&self) = c.fill_preserve(self.handle)
 
     // Stroke the current path, and clear it.
-    stroke(&self) = externs.stroke(self.handle)
-    stroke_preserve(&self) = externs.stroke_preserve(self.handle)
+    stroke(&self) = c.stroke(self.handle)
+    stroke_preserve(&self) = c.stroke_preserve(self.handle)
 
     // The box a `fill` or a `stroke` of the current path would touch, as `(x1, y1, x2, y2)`. The
     // stroke's is larger by half the line width, plus whatever the caps and joins add.
@@ -266,7 +266,7 @@ struct Context
         var x2 = 0.0
         var y2 = 0.0
 
-        externs.fill_extents(self.handle, &x1, &y1, &x2, &y2)
+        c.fill_extents(self.handle, &x1, &y1, &x2, &y2)
         (x1, y1, x2, y2)
     end fill_extents
 
@@ -276,23 +276,23 @@ struct Context
         var x2 = 0.0
         var y2 = 0.0
 
-        externs.stroke_extents(self.handle, &x1, &y1, &x2, &y2)
+        c.stroke_extents(self.handle, &x1, &y1, &x2, &y2)
         (x1, y1, x2, y2)
     end stroke_extents
 
     // Hit testing, in user space: whether a point is inside the fill, on the stroke, or within the
     // clip. This is what turns a drawing into something a mouse can be over.
-    in_fill(&self, x: real, y: real) -> bool = externs.in_fill(self.handle, x, y)
-    in_stroke(&self, x: real, y: real) -> bool = externs.in_stroke(self.handle, x, y)
-    in_clip(&self, x: real, y: real) -> bool = externs.in_clip(self.handle, x, y)
+    in_fill(&self, x: real, y: real) -> bool = c.in_fill(self.handle, x, y)
+    in_stroke(&self, x: real, y: real) -> bool = c.in_stroke(self.handle, x, y)
+    in_clip(&self, x: real, y: real) -> bool = c.in_clip(self.handle, x, y)
 
     // ---- clipping ----
 
     // Narrow the clip to the current path, and clear it. The clip only ever shrinks; `reset_clip`
     // widens it again, and `save`/`restore` is the usual way to put it back.
-    clip(&self) = externs.clip(self.handle)
-    clip_preserve(&self) = externs.clip_preserve(self.handle)
-    reset_clip(&self) = externs.reset_clip(self.handle)
+    clip(&self) = c.clip(self.handle)
+    clip_preserve(&self) = c.clip_preserve(self.handle)
+    reset_clip(&self) = c.reset_clip(self.handle)
 
     clip_extents(&self) -> (real, real, real, real)
         var x1 = 0.0
@@ -300,7 +300,7 @@ struct Context
         var x2 = 0.0
         var y2 = 0.0
 
-        externs.clip_extents(self.handle, &x1, &y1, &x2, &y2)
+        c.clip_extents(self.handle, &x1, &y1, &x2, &y2)
         (x1, y1, x2, y2)
     end clip_extents
 
@@ -308,8 +308,8 @@ struct Context
 
     // Emit the current page and start a new one. `copy_page` keeps the contents for the next page;
     // `show_page` clears them.
-    show_page(&self) = externs.show_page(self.handle)
-    copy_page(&self) = externs.copy_page(self.handle)
+    show_page(&self) = c.show_page(self.handle)
+    copy_page(&self) = c.copy_page(self.handle)
 
     // ---- text ----
 
@@ -319,51 +319,51 @@ struct Context
     select_font_face(&self, family: string, slant: FontSlant, weight: FontWeight)
         var f = cstring(family)
 
-        externs.select_font_face(self.handle, f.ptr, slant.code(), weight.code())
+        c.select_font_face(self.handle, f.ptr, slant.code(), weight.code())
     end select_font_face
 
-    set_font_size(&self, size: real) = externs.set_font_size(self.handle, size)
+    set_font_size(&self, size: real) = c.set_font_size(self.handle, size)
 
     // The full font matrix, for text that is stretched or sheared rather than merely sized.
     set_font_matrix(&self, matrix: Matrix)
         var m = matrix
 
-        externs.set_font_matrix(self.handle, m.ptr())
+        c.set_font_matrix(self.handle, m.ptr())
     end set_font_matrix
 
     font_matrix(&self) -> Matrix
         var m = identity()
 
-        externs.get_font_matrix(self.handle, m.ptr())
+        c.get_font_matrix(self.handle, m.ptr())
         m
     end font_matrix
 
     set_font_options(&self, options: &FontOptions) =
-        externs.set_font_options(self.handle, options.handle)
+        c.set_font_options(self.handle, options.handle)
 
     // Read the context's font options into the given object, which is cairo's own out-parameter
     // shape here rather than something the binding chose.
     read_font_options(&self, options: &FontOptions) =
-        externs.get_font_options(self.handle, options.handle)
+        c.get_font_options(self.handle, options.handle)
 
-    set_font_face(&self, face: &FontFace) = externs.set_font_face(self.handle, face.handle)
+    set_font_face(&self, face: &FontFace) = c.set_font_face(self.handle, face.handle)
 
     // The current font face. Lent, so referenced before wrapping.
     font_face(&self) -> &FontFace =
-        FontFace(externs.font_face_reference(externs.get_font_face(self.handle)))
+        FontFace(c.font_face_reference(c.get_font_face(self.handle)))
 
-    set_scaled_font(&self, font: &ScaledFont) = externs.set_scaled_font(self.handle, font.handle)
+    set_scaled_font(&self, font: &ScaledFont) = c.set_scaled_font(self.handle, font.handle)
 
     // The font actually in use: the face, the size, the transform and the options resolved into one
     // object. Lent, so referenced before wrapping.
     scaled_font(&self) -> &ScaledFont =
-        ScaledFont(externs.scaled_font_reference(externs.get_scaled_font(self.handle)))
+        ScaledFont(c.scaled_font_reference(c.get_scaled_font(self.handle)))
 
     // Draw text at the current point, and move the point to where the text ended.
     show_text(&self, text: string)
         var t = cstring(text)
 
-        externs.show_text(self.handle, t.ptr)
+        c.show_text(self.handle, t.ptr)
     end show_text
 
     // How much room a string takes, in user units, without drawing it.
@@ -371,7 +371,7 @@ struct Context
         var t = cstring(text)
         var e = text_extents()
 
-        externs.text_extents(self.handle, t.ptr, e.ptr())
+        c.text_extents(self.handle, t.ptr, e.ptr())
         e
     end text_extents
 
@@ -380,23 +380,23 @@ struct Context
     font_extents(&self) -> FontExtents
         var e = font_extents()
 
-        externs.font_extents(self.handle, e.ptr())
+        c.font_extents(self.handle, e.ptr())
         e
     end font_extents
 
     // Draw glyphs the caller has already chosen and placed. This is the text layer a shaping engine
     // hands its output to; `index` is a glyph number in the font, not a character.
     show_glyphs(&self, glyphs: []const Glyph) =
-        externs.show_glyphs(self.handle, ptr_cast(as_ptr(glyphs)), int(glyphs.len))
+        c.show_glyphs(self.handle, ptr_cast(as_ptr(glyphs)), int(glyphs.len))
 
     // Their outlines, added to the path rather than painted.
     glyph_path(&self, glyphs: []const Glyph) =
-        externs.glyph_path(self.handle, ptr_cast(as_ptr(glyphs)), int(glyphs.len))
+        c.glyph_path(self.handle, ptr_cast(as_ptr(glyphs)), int(glyphs.len))
 
     glyph_extents(&self, glyphs: []const Glyph) -> TextExtents
         var e = text_extents()
 
-        externs.glyph_extents(self.handle, ptr_cast(as_ptr(glyphs)), int(glyphs.len), e.ptr())
+        c.glyph_extents(self.handle, ptr_cast(as_ptr(glyphs)), int(glyphs.len), e.ptr())
         e
     end glyph_extents
 
@@ -411,21 +411,21 @@ struct Context
         var n = cstring(name)
         var a = cstring(attributes)
 
-        externs.tag_begin(self.handle, n.ptr, a.ptr)
+        c.tag_begin(self.handle, n.ptr, a.ptr)
     end tag_begin
 
     tag_end(&self, name: string)
         var n = cstring(name)
 
-        externs.tag_end(self.handle, n.ptr)
+        c.tag_end(self.handle, n.ptr)
     end tag_end
 end Context
 
 impl Drop for Context
-    drop(self) = externs.destroy(self.handle)
+    drop(self) = c.destroy(self.handle)
 
 // A context that draws on the given surface.
 //
 // Cairo takes a reference to the surface, so the surface lives at least as long as this context
 // whatever happens to the caller's own reference.
-context(target: &Surface) -> &Context = Context(externs.create(target.handle))
+context(target: &Surface) -> &Context = Context(c.create(target.handle))

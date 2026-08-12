@@ -1,8 +1,13 @@
-// Cairo's own surface, declared verbatim.
+// Cairo's own surface, declared verbatim — **everything in this package that is C lives here**.
 //
 // **Nothing here is meant to be called by a program.** Every name and every convention is C's: a
 // matrix is six doubles behind a pointer, a string is a NUL-terminated `*u8`, an enumeration is an
 // `int`. The modules beside this one turn those into sysl and are what an application imports.
+//
+// The module is named `c` because that is what it is: every `@link`, every `@include`, every
+// `c const`, every opaque handle and every `extern` in this package is in this one file, and a call
+// site next door reads `c.surface_destroy(h)` — which says where it goes without a comment. A
+// package that carried its own `.c` files would put them in this directory too.
 //
 // The split keeps two jobs apart. This one has to be **faithful** — a signature that disagrees with
 // the C header links perfectly and corrupts the call at run time, and nothing in this arrangement
@@ -19,8 +24,166 @@
 // through a pointer into storage the *caller* owns, which is the house pattern and needs nothing
 // from the language beyond taking a struct's address.
 
-module sh.sysl.cairo.externs
+module sh.sysl.cairo.c
 @link("cairo")
+
+
+// ## The values
+//
+// **No number is written here.** Each is what the C compiler computes for cairo's own name, for the
+// target being built — so a transposed digit is impossible rather than merely unlikely. `15 §7`
+// calls a transcribed constant "correct on one machine" with "nothing checking it", and a
+// `c const` block is what it asks for instead.
+//
+// They sit in this module rather than beside the enums that use them for the same reason the
+// `extern`s do: this is the layer that speaks C, and a `CAIRO_STATUS_SUCCESS` is as much a C name
+// as a `cairo_create` is. The module next door turns them into a `Status`.
+//
+// Three headers, because cairo puts the vector backends' values in their own.
+
+@include("cairo.h")
+@include("cairo-pdf.h")
+@include("cairo-svg.h")
+
+c const
+    STATUS_SUCCESS: int = "CAIRO_STATUS_SUCCESS"
+    STATUS_NO_MEMORY: int = "CAIRO_STATUS_NO_MEMORY"
+    STATUS_INVALID_RESTORE: int = "CAIRO_STATUS_INVALID_RESTORE"
+    STATUS_INVALID_POP_GROUP: int = "CAIRO_STATUS_INVALID_POP_GROUP"
+    STATUS_NO_CURRENT_POINT: int = "CAIRO_STATUS_NO_CURRENT_POINT"
+    STATUS_INVALID_MATRIX: int = "CAIRO_STATUS_INVALID_MATRIX"
+    STATUS_INVALID_STATUS: int = "CAIRO_STATUS_INVALID_STATUS"
+    STATUS_NULL_POINTER: int = "CAIRO_STATUS_NULL_POINTER"
+    STATUS_INVALID_STRING: int = "CAIRO_STATUS_INVALID_STRING"
+    STATUS_INVALID_PATH_DATA: int = "CAIRO_STATUS_INVALID_PATH_DATA"
+    STATUS_READ_ERROR: int = "CAIRO_STATUS_READ_ERROR"
+    STATUS_WRITE_ERROR: int = "CAIRO_STATUS_WRITE_ERROR"
+    STATUS_SURFACE_FINISHED: int = "CAIRO_STATUS_SURFACE_FINISHED"
+    STATUS_SURFACE_TYPE_MISMATCH: int = "CAIRO_STATUS_SURFACE_TYPE_MISMATCH"
+    STATUS_PATTERN_TYPE_MISMATCH: int = "CAIRO_STATUS_PATTERN_TYPE_MISMATCH"
+    STATUS_INVALID_CONTENT: int = "CAIRO_STATUS_INVALID_CONTENT"
+    STATUS_INVALID_FORMAT: int = "CAIRO_STATUS_INVALID_FORMAT"
+    STATUS_INVALID_VISUAL: int = "CAIRO_STATUS_INVALID_VISUAL"
+    STATUS_FILE_NOT_FOUND: int = "CAIRO_STATUS_FILE_NOT_FOUND"
+    STATUS_INVALID_DASH: int = "CAIRO_STATUS_INVALID_DASH"
+    FORMAT_INVALID: int = "CAIRO_FORMAT_INVALID"
+    FORMAT_ARGB32: int = "CAIRO_FORMAT_ARGB32"
+    FORMAT_RGB24: int = "CAIRO_FORMAT_RGB24"
+    FORMAT_A8: int = "CAIRO_FORMAT_A8"
+    FORMAT_A1: int = "CAIRO_FORMAT_A1"
+    FORMAT_RGB16_565: int = "CAIRO_FORMAT_RGB16_565"
+    FORMAT_RGB30: int = "CAIRO_FORMAT_RGB30"
+    FORMAT_RGB96F: int = "CAIRO_FORMAT_RGB96F"
+    FORMAT_RGBA128F: int = "CAIRO_FORMAT_RGBA128F"
+    CONTENT_COLOR: int = "CAIRO_CONTENT_COLOR"
+    CONTENT_ALPHA: int = "CAIRO_CONTENT_ALPHA"
+    CONTENT_COLOR_ALPHA: int = "CAIRO_CONTENT_COLOR_ALPHA"
+    OPERATOR_CLEAR: int = "CAIRO_OPERATOR_CLEAR"
+    OPERATOR_SOURCE: int = "CAIRO_OPERATOR_SOURCE"
+    OPERATOR_OVER: int = "CAIRO_OPERATOR_OVER"
+    OPERATOR_IN: int = "CAIRO_OPERATOR_IN"
+    OPERATOR_OUT: int = "CAIRO_OPERATOR_OUT"
+    OPERATOR_ATOP: int = "CAIRO_OPERATOR_ATOP"
+    OPERATOR_DEST: int = "CAIRO_OPERATOR_DEST"
+    OPERATOR_DEST_OVER: int = "CAIRO_OPERATOR_DEST_OVER"
+    OPERATOR_DEST_IN: int = "CAIRO_OPERATOR_DEST_IN"
+    OPERATOR_DEST_OUT: int = "CAIRO_OPERATOR_DEST_OUT"
+    OPERATOR_DEST_ATOP: int = "CAIRO_OPERATOR_DEST_ATOP"
+    OPERATOR_XOR: int = "CAIRO_OPERATOR_XOR"
+    OPERATOR_ADD: int = "CAIRO_OPERATOR_ADD"
+    OPERATOR_SATURATE: int = "CAIRO_OPERATOR_SATURATE"
+    OPERATOR_MULTIPLY: int = "CAIRO_OPERATOR_MULTIPLY"
+    OPERATOR_SCREEN: int = "CAIRO_OPERATOR_SCREEN"
+    OPERATOR_OVERLAY: int = "CAIRO_OPERATOR_OVERLAY"
+    OPERATOR_DARKEN: int = "CAIRO_OPERATOR_DARKEN"
+    OPERATOR_LIGHTEN: int = "CAIRO_OPERATOR_LIGHTEN"
+    OPERATOR_COLOR_DODGE: int = "CAIRO_OPERATOR_COLOR_DODGE"
+    OPERATOR_COLOR_BURN: int = "CAIRO_OPERATOR_COLOR_BURN"
+    OPERATOR_HARD_LIGHT: int = "CAIRO_OPERATOR_HARD_LIGHT"
+    OPERATOR_SOFT_LIGHT: int = "CAIRO_OPERATOR_SOFT_LIGHT"
+    OPERATOR_DIFFERENCE: int = "CAIRO_OPERATOR_DIFFERENCE"
+    OPERATOR_EXCLUSION: int = "CAIRO_OPERATOR_EXCLUSION"
+    OPERATOR_HSL_HUE: int = "CAIRO_OPERATOR_HSL_HUE"
+    OPERATOR_HSL_SATURATION: int = "CAIRO_OPERATOR_HSL_SATURATION"
+    OPERATOR_HSL_COLOR: int = "CAIRO_OPERATOR_HSL_COLOR"
+    OPERATOR_HSL_LUMINOSITY: int = "CAIRO_OPERATOR_HSL_LUMINOSITY"
+    ANTIALIAS_DEFAULT: int = "CAIRO_ANTIALIAS_DEFAULT"
+    ANTIALIAS_NONE: int = "CAIRO_ANTIALIAS_NONE"
+    ANTIALIAS_GRAY: int = "CAIRO_ANTIALIAS_GRAY"
+    ANTIALIAS_SUBPIXEL: int = "CAIRO_ANTIALIAS_SUBPIXEL"
+    ANTIALIAS_FAST: int = "CAIRO_ANTIALIAS_FAST"
+    ANTIALIAS_GOOD: int = "CAIRO_ANTIALIAS_GOOD"
+    ANTIALIAS_BEST: int = "CAIRO_ANTIALIAS_BEST"
+    FILL_RULE_WINDING: int = "CAIRO_FILL_RULE_WINDING"
+    FILL_RULE_EVEN_ODD: int = "CAIRO_FILL_RULE_EVEN_ODD"
+    LINE_CAP_BUTT: int = "CAIRO_LINE_CAP_BUTT"
+    LINE_CAP_ROUND: int = "CAIRO_LINE_CAP_ROUND"
+    LINE_CAP_SQUARE: int = "CAIRO_LINE_CAP_SQUARE"
+    LINE_JOIN_MITER: int = "CAIRO_LINE_JOIN_MITER"
+    LINE_JOIN_ROUND: int = "CAIRO_LINE_JOIN_ROUND"
+    LINE_JOIN_BEVEL: int = "CAIRO_LINE_JOIN_BEVEL"
+    FONT_SLANT_NORMAL: int = "CAIRO_FONT_SLANT_NORMAL"
+    FONT_SLANT_ITALIC: int = "CAIRO_FONT_SLANT_ITALIC"
+    FONT_SLANT_OBLIQUE: int = "CAIRO_FONT_SLANT_OBLIQUE"
+    FONT_WEIGHT_NORMAL: int = "CAIRO_FONT_WEIGHT_NORMAL"
+    FONT_WEIGHT_BOLD: int = "CAIRO_FONT_WEIGHT_BOLD"
+    SUBPIXEL_ORDER_DEFAULT: int = "CAIRO_SUBPIXEL_ORDER_DEFAULT"
+    SUBPIXEL_ORDER_RGB: int = "CAIRO_SUBPIXEL_ORDER_RGB"
+    SUBPIXEL_ORDER_BGR: int = "CAIRO_SUBPIXEL_ORDER_BGR"
+    SUBPIXEL_ORDER_VRGB: int = "CAIRO_SUBPIXEL_ORDER_VRGB"
+    SUBPIXEL_ORDER_VBGR: int = "CAIRO_SUBPIXEL_ORDER_VBGR"
+    HINT_STYLE_DEFAULT: int = "CAIRO_HINT_STYLE_DEFAULT"
+    HINT_STYLE_NONE: int = "CAIRO_HINT_STYLE_NONE"
+    HINT_STYLE_SLIGHT: int = "CAIRO_HINT_STYLE_SLIGHT"
+    HINT_STYLE_MEDIUM: int = "CAIRO_HINT_STYLE_MEDIUM"
+    HINT_STYLE_FULL: int = "CAIRO_HINT_STYLE_FULL"
+    HINT_METRICS_DEFAULT: int = "CAIRO_HINT_METRICS_DEFAULT"
+    HINT_METRICS_OFF: int = "CAIRO_HINT_METRICS_OFF"
+    HINT_METRICS_ON: int = "CAIRO_HINT_METRICS_ON"
+    EXTEND_NONE: int = "CAIRO_EXTEND_NONE"
+    EXTEND_REPEAT: int = "CAIRO_EXTEND_REPEAT"
+    EXTEND_REFLECT: int = "CAIRO_EXTEND_REFLECT"
+    EXTEND_PAD: int = "CAIRO_EXTEND_PAD"
+    FILTER_FAST: int = "CAIRO_FILTER_FAST"
+    FILTER_GOOD: int = "CAIRO_FILTER_GOOD"
+    FILTER_BEST: int = "CAIRO_FILTER_BEST"
+    FILTER_NEAREST: int = "CAIRO_FILTER_NEAREST"
+    FILTER_BILINEAR: int = "CAIRO_FILTER_BILINEAR"
+    FILTER_GAUSSIAN: int = "CAIRO_FILTER_GAUSSIAN"
+    SURFACE_TYPE_IMAGE: int = "CAIRO_SURFACE_TYPE_IMAGE"
+    SURFACE_TYPE_PDF: int = "CAIRO_SURFACE_TYPE_PDF"
+    SURFACE_TYPE_PS: int = "CAIRO_SURFACE_TYPE_PS"
+    SURFACE_TYPE_SVG: int = "CAIRO_SURFACE_TYPE_SVG"
+    SURFACE_TYPE_RECORDING: int = "CAIRO_SURFACE_TYPE_RECORDING"
+    PATTERN_TYPE_SOLID: int = "CAIRO_PATTERN_TYPE_SOLID"
+    PATTERN_TYPE_SURFACE: int = "CAIRO_PATTERN_TYPE_SURFACE"
+    PATTERN_TYPE_LINEAR: int = "CAIRO_PATTERN_TYPE_LINEAR"
+    PATTERN_TYPE_RADIAL: int = "CAIRO_PATTERN_TYPE_RADIAL"
+    PATTERN_TYPE_MESH: int = "CAIRO_PATTERN_TYPE_MESH"
+    PATTERN_TYPE_RASTER_SOURCE: int = "CAIRO_PATTERN_TYPE_RASTER_SOURCE"
+    FONT_TYPE_TOY: int = "CAIRO_FONT_TYPE_TOY"
+    FONT_TYPE_FT: int = "CAIRO_FONT_TYPE_FT"
+    FONT_TYPE_WIN32: int = "CAIRO_FONT_TYPE_WIN32"
+    FONT_TYPE_QUARTZ: int = "CAIRO_FONT_TYPE_QUARTZ"
+    FONT_TYPE_USER: int = "CAIRO_FONT_TYPE_USER"
+    FONT_TYPE_DWRITE: int = "CAIRO_FONT_TYPE_DWRITE"
+    PDF_VERSION_1_4: int = "CAIRO_PDF_VERSION_1_4"
+    PDF_VERSION_1_5: int = "CAIRO_PDF_VERSION_1_5"
+    PDF_VERSION_1_6: int = "CAIRO_PDF_VERSION_1_6"
+    PDF_VERSION_1_7: int = "CAIRO_PDF_VERSION_1_7"
+    PDF_METADATA_TITLE: int = "CAIRO_PDF_METADATA_TITLE"
+    PDF_METADATA_AUTHOR: int = "CAIRO_PDF_METADATA_AUTHOR"
+    PDF_METADATA_SUBJECT: int = "CAIRO_PDF_METADATA_SUBJECT"
+    PDF_METADATA_KEYWORDS: int = "CAIRO_PDF_METADATA_KEYWORDS"
+    PDF_METADATA_CREATOR: int = "CAIRO_PDF_METADATA_CREATOR"
+    PDF_METADATA_CREATE_DATE: int = "CAIRO_PDF_METADATA_CREATE_DATE"
+    PDF_METADATA_MOD_DATE: int = "CAIRO_PDF_METADATA_MOD_DATE"
+    SVG_VERSION_1_1: int = "CAIRO_SVG_VERSION_1_1"
+    SVG_VERSION_1_2: int = "CAIRO_SVG_VERSION_1_2"
+    PDF_OUTLINE_FLAG_OPEN: int = "CAIRO_PDF_OUTLINE_FLAG_OPEN"
+    PDF_OUTLINE_FLAG_BOLD: int = "CAIRO_PDF_OUTLINE_FLAG_BOLD"
+    PDF_OUTLINE_FLAG_ITALIC: int = "CAIRO_PDF_OUTLINE_FLAG_ITALIC"
+    PDF_OUTLINE_ROOT: int = "CAIRO_PDF_OUTLINE_ROOT"
 
 // ## The handles
 //

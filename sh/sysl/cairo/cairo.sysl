@@ -57,7 +57,7 @@
 
 module sh.sysl.cairo
 
-import sh.sysl.cairo.externs
+import sh.sysl.cairo.c
 import sysl.text.from_cstring
 
 // ## The enumerations
@@ -115,55 +115,55 @@ enum Status
     // Cairo's own sentence for it — "out of memory", "invalid matrix (not invertible)", and so on.
     // The string is a static one inside the library, so nothing here owns it.
     message(self) -> string =
-        from_cstring(externs.status_to_string(self.code())).unwrap_or("an error cairo could not describe")
+        from_cstring(c.status_to_string(self.code())).unwrap_or("an error cairo could not describe")
 
     code(self) -> int
         self match
-            Success -> 0
-            NoMemory -> 1
-            InvalidRestore -> 2
-            InvalidPopGroup -> 3
-            NoCurrentPoint -> 4
-            InvalidMatrix -> 5
-            InvalidStatus -> 6
-            NullPointer -> 7
-            InvalidString -> 8
-            InvalidPathData -> 9
-            ReadError -> 10
-            WriteError -> 11
-            SurfaceFinished -> 12
-            SurfaceTypeMismatch -> 13
-            PatternTypeMismatch -> 14
-            InvalidContent -> 15
-            InvalidFormat -> 16
-            InvalidVisual -> 17
-            FileNotFound -> 18
-            InvalidDash -> 19
-            Other(c) -> c
+            Success -> c.STATUS_SUCCESS
+            NoMemory -> c.STATUS_NO_MEMORY
+            InvalidRestore -> c.STATUS_INVALID_RESTORE
+            InvalidPopGroup -> c.STATUS_INVALID_POP_GROUP
+            NoCurrentPoint -> c.STATUS_NO_CURRENT_POINT
+            InvalidMatrix -> c.STATUS_INVALID_MATRIX
+            InvalidStatus -> c.STATUS_INVALID_STATUS
+            NullPointer -> c.STATUS_NULL_POINTER
+            InvalidString -> c.STATUS_INVALID_STRING
+            InvalidPathData -> c.STATUS_INVALID_PATH_DATA
+            ReadError -> c.STATUS_READ_ERROR
+            WriteError -> c.STATUS_WRITE_ERROR
+            SurfaceFinished -> c.STATUS_SURFACE_FINISHED
+            SurfaceTypeMismatch -> c.STATUS_SURFACE_TYPE_MISMATCH
+            PatternTypeMismatch -> c.STATUS_PATTERN_TYPE_MISMATCH
+            InvalidContent -> c.STATUS_INVALID_CONTENT
+            InvalidFormat -> c.STATUS_INVALID_FORMAT
+            InvalidVisual -> c.STATUS_INVALID_VISUAL
+            FileNotFound -> c.STATUS_FILE_NOT_FOUND
+            InvalidDash -> c.STATUS_INVALID_DASH
+            Other(n) -> n
 
     of(code: int) -> Status
         code match
-            0 -> Success
-            1 -> NoMemory
-            2 -> InvalidRestore
-            3 -> InvalidPopGroup
-            4 -> NoCurrentPoint
-            5 -> InvalidMatrix
-            6 -> InvalidStatus
-            7 -> NullPointer
-            8 -> InvalidString
-            9 -> InvalidPathData
-            10 -> ReadError
-            11 -> WriteError
-            12 -> SurfaceFinished
-            13 -> SurfaceTypeMismatch
-            14 -> PatternTypeMismatch
-            15 -> InvalidContent
-            16 -> InvalidFormat
-            17 -> InvalidVisual
-            18 -> FileNotFound
-            19 -> InvalidDash
-            c -> Other(c)
+            c.STATUS_SUCCESS -> Success
+            c.STATUS_NO_MEMORY -> NoMemory
+            c.STATUS_INVALID_RESTORE -> InvalidRestore
+            c.STATUS_INVALID_POP_GROUP -> InvalidPopGroup
+            c.STATUS_NO_CURRENT_POINT -> NoCurrentPoint
+            c.STATUS_INVALID_MATRIX -> InvalidMatrix
+            c.STATUS_INVALID_STATUS -> InvalidStatus
+            c.STATUS_NULL_POINTER -> NullPointer
+            c.STATUS_INVALID_STRING -> InvalidString
+            c.STATUS_INVALID_PATH_DATA -> InvalidPathData
+            c.STATUS_READ_ERROR -> ReadError
+            c.STATUS_WRITE_ERROR -> WriteError
+            c.STATUS_SURFACE_FINISHED -> SurfaceFinished
+            c.STATUS_SURFACE_TYPE_MISMATCH -> SurfaceTypeMismatch
+            c.STATUS_PATTERN_TYPE_MISMATCH -> PatternTypeMismatch
+            c.STATUS_INVALID_CONTENT -> InvalidContent
+            c.STATUS_INVALID_FORMAT -> InvalidFormat
+            c.STATUS_INVALID_VISUAL -> InvalidVisual
+            c.STATUS_FILE_NOT_FOUND -> FileNotFound
+            c.STATUS_INVALID_DASH -> InvalidDash
+            n -> Other(n)
 end Status
 
 // So that `print(s)` and `f"$s"` say the sentence rather than the number.
@@ -186,33 +186,33 @@ enum Format
 
     code(self) -> int
         self match
-            Invalid -> -1
-            Argb32 -> 0
-            Rgb24 -> 1
-            A8 -> 2
-            A1 -> 3
-            Rgb16_565 -> 4
-            Rgb30 -> 5
-            Rgb96f -> 6
-            Rgba128f -> 7
-            Other(c) -> c
+            Invalid -> c.FORMAT_INVALID
+            Argb32 -> c.FORMAT_ARGB32
+            Rgb24 -> c.FORMAT_RGB24
+            A8 -> c.FORMAT_A8
+            A1 -> c.FORMAT_A1
+            Rgb16_565 -> c.FORMAT_RGB16_565
+            Rgb30 -> c.FORMAT_RGB30
+            Rgb96f -> c.FORMAT_RGB96F
+            Rgba128f -> c.FORMAT_RGBA128F
+            Other(n) -> n
 
     of(code: int) -> Format
         code match
-            -1 -> Invalid
-            0 -> Argb32
-            1 -> Rgb24
-            2 -> A8
-            3 -> A1
-            4 -> Rgb16_565
-            5 -> Rgb30
-            6 -> Rgb96f
-            7 -> Rgba128f
-            c -> Other(c)
+            c.FORMAT_INVALID -> Invalid
+            c.FORMAT_ARGB32 -> Argb32
+            c.FORMAT_RGB24 -> Rgb24
+            c.FORMAT_A8 -> A8
+            c.FORMAT_A1 -> A1
+            c.FORMAT_RGB16_565 -> Rgb16_565
+            c.FORMAT_RGB30 -> Rgb30
+            c.FORMAT_RGB96F -> Rgb96f
+            c.FORMAT_RGBA128F -> Rgba128f
+            n -> Other(n)
 
     // The row length cairo requires for this format at a width, which is `width * bytes` rounded up
     // to whatever alignment the machine wants. Negative for a format cairo does not know.
-    stride_for_width(self, width: int) -> int = externs.format_stride_for_width(self.code(), width)
+    stride_for_width(self, width: int) -> int = c.format_stride_for_width(self.code(), width)
 end Format
 
 impl Display for Format
@@ -227,7 +227,7 @@ impl Display for Format
             Rgb30 -> "rgb30"
             Rgb96f -> "rgb96f"
             Rgba128f -> "rgba128f"
-            Other(c) -> "an unknown format"
+            Other(n) -> "an unknown format"
 
         display_str(s, out, fmt)
 
@@ -240,17 +240,17 @@ enum Content
 
     code(self) -> int
         self match
-            Color -> 0x1000
-            Alpha -> 0x2000
-            ColorAlpha -> 0x3000
-            Other(c) -> c
+            Color -> c.CONTENT_COLOR
+            Alpha -> c.CONTENT_ALPHA
+            ColorAlpha -> c.CONTENT_COLOR_ALPHA
+            Other(n) -> n
 
     of(code: int) -> Content
         code match
-            0x1000 -> Color
-            0x2000 -> Alpha
-            0x3000 -> ColorAlpha
-            c -> Other(c)
+            c.CONTENT_COLOR -> Color
+            c.CONTENT_ALPHA -> Alpha
+            c.CONTENT_COLOR_ALPHA -> ColorAlpha
+            n -> Other(n)
 end Content
 
 // How the source is combined with what is already there. `Over` is the default and is ordinary
@@ -289,69 +289,69 @@ enum Operator
 
     code(self) -> int
         self match
-            Clear -> 0
-            Source -> 1
-            Over -> 2
-            In -> 3
-            Out -> 4
-            Atop -> 5
-            Dest -> 6
-            DestOver -> 7
-            DestIn -> 8
-            DestOut -> 9
-            DestAtop -> 10
-            Xor -> 11
-            Add -> 12
-            Saturate -> 13
-            Multiply -> 14
-            Screen -> 15
-            Overlay -> 16
-            Darken -> 17
-            Lighten -> 18
-            ColorDodge -> 19
-            ColorBurn -> 20
-            HardLight -> 21
-            SoftLight -> 22
-            Difference -> 23
-            Exclusion -> 24
-            HslHue -> 25
-            HslSaturation -> 26
-            HslColor -> 27
-            HslLuminosity -> 28
-            Other(c) -> c
+            Clear -> c.OPERATOR_CLEAR
+            Source -> c.OPERATOR_SOURCE
+            Over -> c.OPERATOR_OVER
+            In -> c.OPERATOR_IN
+            Out -> c.OPERATOR_OUT
+            Atop -> c.OPERATOR_ATOP
+            Dest -> c.OPERATOR_DEST
+            DestOver -> c.OPERATOR_DEST_OVER
+            DestIn -> c.OPERATOR_DEST_IN
+            DestOut -> c.OPERATOR_DEST_OUT
+            DestAtop -> c.OPERATOR_DEST_ATOP
+            Xor -> c.OPERATOR_XOR
+            Add -> c.OPERATOR_ADD
+            Saturate -> c.OPERATOR_SATURATE
+            Multiply -> c.OPERATOR_MULTIPLY
+            Screen -> c.OPERATOR_SCREEN
+            Overlay -> c.OPERATOR_OVERLAY
+            Darken -> c.OPERATOR_DARKEN
+            Lighten -> c.OPERATOR_LIGHTEN
+            ColorDodge -> c.OPERATOR_COLOR_DODGE
+            ColorBurn -> c.OPERATOR_COLOR_BURN
+            HardLight -> c.OPERATOR_HARD_LIGHT
+            SoftLight -> c.OPERATOR_SOFT_LIGHT
+            Difference -> c.OPERATOR_DIFFERENCE
+            Exclusion -> c.OPERATOR_EXCLUSION
+            HslHue -> c.OPERATOR_HSL_HUE
+            HslSaturation -> c.OPERATOR_HSL_SATURATION
+            HslColor -> c.OPERATOR_HSL_COLOR
+            HslLuminosity -> c.OPERATOR_HSL_LUMINOSITY
+            Other(n) -> n
 
     of(code: int) -> Operator
         code match
-            0 -> Clear
-            1 -> Source
-            2 -> Over
-            3 -> In
-            4 -> Out
-            5 -> Atop
-            6 -> Dest
-            7 -> DestOver
-            8 -> DestIn
-            9 -> DestOut
-            10 -> DestAtop
-            11 -> Xor
-            12 -> Add
-            13 -> Saturate
-            14 -> Multiply
-            15 -> Screen
-            16 -> Overlay
-            17 -> Darken
-            18 -> Lighten
-            19 -> ColorDodge
-            20 -> ColorBurn
-            21 -> HardLight
-            22 -> SoftLight
-            23 -> Difference
-            24 -> Exclusion
-            25 -> HslHue
-            26 -> HslSaturation
-            27 -> HslColor
-            28 -> HslLuminosity
-            c -> Other(c)
+            c.OPERATOR_CLEAR -> Clear
+            c.OPERATOR_SOURCE -> Source
+            c.OPERATOR_OVER -> Over
+            c.OPERATOR_IN -> In
+            c.OPERATOR_OUT -> Out
+            c.OPERATOR_ATOP -> Atop
+            c.OPERATOR_DEST -> Dest
+            c.OPERATOR_DEST_OVER -> DestOver
+            c.OPERATOR_DEST_IN -> DestIn
+            c.OPERATOR_DEST_OUT -> DestOut
+            c.OPERATOR_DEST_ATOP -> DestAtop
+            c.OPERATOR_XOR -> Xor
+            c.OPERATOR_ADD -> Add
+            c.OPERATOR_SATURATE -> Saturate
+            c.OPERATOR_MULTIPLY -> Multiply
+            c.OPERATOR_SCREEN -> Screen
+            c.OPERATOR_OVERLAY -> Overlay
+            c.OPERATOR_DARKEN -> Darken
+            c.OPERATOR_LIGHTEN -> Lighten
+            c.OPERATOR_COLOR_DODGE -> ColorDodge
+            c.OPERATOR_COLOR_BURN -> ColorBurn
+            c.OPERATOR_HARD_LIGHT -> HardLight
+            c.OPERATOR_SOFT_LIGHT -> SoftLight
+            c.OPERATOR_DIFFERENCE -> Difference
+            c.OPERATOR_EXCLUSION -> Exclusion
+            c.OPERATOR_HSL_HUE -> HslHue
+            c.OPERATOR_HSL_SATURATION -> HslSaturation
+            c.OPERATOR_HSL_COLOR -> HslColor
+            c.OPERATOR_HSL_LUMINOSITY -> HslLuminosity
+            n -> Other(n)
 end Operator
 
 // How edges are smoothed. `Default` lets cairo choose for the backend.
@@ -367,25 +367,25 @@ enum Antialias
 
     code(self) -> int
         self match
-            Default -> 0
-            Off -> 1
-            Gray -> 2
-            Subpixel -> 3
-            Fast -> 4
-            Good -> 5
-            Best -> 6
-            Other(c) -> c
+            Default -> c.ANTIALIAS_DEFAULT
+            Off -> c.ANTIALIAS_NONE
+            Gray -> c.ANTIALIAS_GRAY
+            Subpixel -> c.ANTIALIAS_SUBPIXEL
+            Fast -> c.ANTIALIAS_FAST
+            Good -> c.ANTIALIAS_GOOD
+            Best -> c.ANTIALIAS_BEST
+            Other(n) -> n
 
     of(code: int) -> Antialias
         code match
-            0 -> Default
-            1 -> Off
-            2 -> Gray
-            3 -> Subpixel
-            4 -> Fast
-            5 -> Good
-            6 -> Best
-            c -> Other(c)
+            c.ANTIALIAS_DEFAULT -> Default
+            c.ANTIALIAS_NONE -> Off
+            c.ANTIALIAS_GRAY -> Gray
+            c.ANTIALIAS_SUBPIXEL -> Subpixel
+            c.ANTIALIAS_FAST -> Fast
+            c.ANTIALIAS_GOOD -> Good
+            c.ANTIALIAS_BEST -> Best
+            n -> Other(n)
 end Antialias
 
 // How a path decides what is inside it when it crosses itself.
@@ -396,15 +396,15 @@ enum FillRule
 
     code(self) -> int
         self match
-            Winding -> 0
-            EvenOdd -> 1
-            Other(c) -> c
+            Winding -> c.FILL_RULE_WINDING
+            EvenOdd -> c.FILL_RULE_EVEN_ODD
+            Other(n) -> n
 
     of(code: int) -> FillRule
         code match
-            0 -> Winding
-            1 -> EvenOdd
-            c -> Other(c)
+            c.FILL_RULE_WINDING -> Winding
+            c.FILL_RULE_EVEN_ODD -> EvenOdd
+            n -> Other(n)
 end FillRule
 
 // How a stroke ends.
@@ -416,17 +416,17 @@ enum LineCap
 
     code(self) -> int
         self match
-            Butt -> 0
-            Round -> 1
-            Square -> 2
-            Other(c) -> c
+            Butt -> c.LINE_CAP_BUTT
+            Round -> c.LINE_CAP_ROUND
+            Square -> c.LINE_CAP_SQUARE
+            Other(n) -> n
 
     of(code: int) -> LineCap
         code match
-            0 -> Butt
-            1 -> Round
-            2 -> Square
-            c -> Other(c)
+            c.LINE_CAP_BUTT -> Butt
+            c.LINE_CAP_ROUND -> Round
+            c.LINE_CAP_SQUARE -> Square
+            n -> Other(n)
 end LineCap
 
 // How two segments of a stroke meet.
@@ -438,17 +438,17 @@ enum LineJoin
 
     code(self) -> int
         self match
-            Miter -> 0
-            Round -> 1
-            Bevel -> 2
-            Other(c) -> c
+            Miter -> c.LINE_JOIN_MITER
+            Round -> c.LINE_JOIN_ROUND
+            Bevel -> c.LINE_JOIN_BEVEL
+            Other(n) -> n
 
     of(code: int) -> LineJoin
         code match
-            0 -> Miter
-            1 -> Round
-            2 -> Bevel
-            c -> Other(c)
+            c.LINE_JOIN_MITER -> Miter
+            c.LINE_JOIN_ROUND -> Round
+            c.LINE_JOIN_BEVEL -> Bevel
+            n -> Other(n)
 end LineJoin
 
 enum FontSlant
@@ -459,17 +459,17 @@ enum FontSlant
 
     code(self) -> int
         self match
-            Normal -> 0
-            Italic -> 1
-            Oblique -> 2
-            Other(c) -> c
+            Normal -> c.FONT_SLANT_NORMAL
+            Italic -> c.FONT_SLANT_ITALIC
+            Oblique -> c.FONT_SLANT_OBLIQUE
+            Other(n) -> n
 
     of(code: int) -> FontSlant
         code match
-            0 -> Normal
-            1 -> Italic
-            2 -> Oblique
-            c -> Other(c)
+            c.FONT_SLANT_NORMAL -> Normal
+            c.FONT_SLANT_ITALIC -> Italic
+            c.FONT_SLANT_OBLIQUE -> Oblique
+            n -> Other(n)
 end FontSlant
 
 enum FontWeight
@@ -479,15 +479,15 @@ enum FontWeight
 
     code(self) -> int
         self match
-            Normal -> 0
-            Bold -> 1
-            Other(c) -> c
+            Normal -> c.FONT_WEIGHT_NORMAL
+            Bold -> c.FONT_WEIGHT_BOLD
+            Other(n) -> n
 
     of(code: int) -> FontWeight
         code match
-            0 -> Normal
-            1 -> Bold
-            c -> Other(c)
+            c.FONT_WEIGHT_NORMAL -> Normal
+            c.FONT_WEIGHT_BOLD -> Bold
+            n -> Other(n)
 end FontWeight
 
 // The order of the coloured stripes in a pixel, for subpixel antialiasing.
@@ -501,21 +501,21 @@ enum SubpixelOrder
 
     code(self) -> int
         self match
-            Default -> 0
-            Rgb -> 1
-            Bgr -> 2
-            Vrgb -> 3
-            Vbgr -> 4
-            Other(c) -> c
+            Default -> c.SUBPIXEL_ORDER_DEFAULT
+            Rgb -> c.SUBPIXEL_ORDER_RGB
+            Bgr -> c.SUBPIXEL_ORDER_BGR
+            Vrgb -> c.SUBPIXEL_ORDER_VRGB
+            Vbgr -> c.SUBPIXEL_ORDER_VBGR
+            Other(n) -> n
 
     of(code: int) -> SubpixelOrder
         code match
-            0 -> Default
-            1 -> Rgb
-            2 -> Bgr
-            3 -> Vrgb
-            4 -> Vbgr
-            c -> Other(c)
+            c.SUBPIXEL_ORDER_DEFAULT -> Default
+            c.SUBPIXEL_ORDER_RGB -> Rgb
+            c.SUBPIXEL_ORDER_BGR -> Bgr
+            c.SUBPIXEL_ORDER_VRGB -> Vrgb
+            c.SUBPIXEL_ORDER_VBGR -> Vbgr
+            n -> Other(n)
 end SubpixelOrder
 
 // How far glyph outlines are distorted to line up with the pixel grid.
@@ -529,21 +529,21 @@ enum HintStyle
 
     code(self) -> int
         self match
-            Default -> 0
-            Off -> 1
-            Slight -> 2
-            Medium -> 3
-            Full -> 4
-            Other(c) -> c
+            Default -> c.HINT_STYLE_DEFAULT
+            Off -> c.HINT_STYLE_NONE
+            Slight -> c.HINT_STYLE_SLIGHT
+            Medium -> c.HINT_STYLE_MEDIUM
+            Full -> c.HINT_STYLE_FULL
+            Other(n) -> n
 
     of(code: int) -> HintStyle
         code match
-            0 -> Default
-            1 -> Off
-            2 -> Slight
-            3 -> Medium
-            4 -> Full
-            c -> Other(c)
+            c.HINT_STYLE_DEFAULT -> Default
+            c.HINT_STYLE_NONE -> Off
+            c.HINT_STYLE_SLIGHT -> Slight
+            c.HINT_STYLE_MEDIUM -> Medium
+            c.HINT_STYLE_FULL -> Full
+            n -> Other(n)
 end HintStyle
 
 // Whether glyph advances are rounded to whole pixels — off is what a PDF wants, on is what a screen
@@ -556,17 +556,17 @@ enum HintMetrics
 
     code(self) -> int
         self match
-            Default -> 0
-            Off -> 1
-            On -> 2
-            Other(c) -> c
+            Default -> c.HINT_METRICS_DEFAULT
+            Off -> c.HINT_METRICS_OFF
+            On -> c.HINT_METRICS_ON
+            Other(n) -> n
 
     of(code: int) -> HintMetrics
         code match
-            0 -> Default
-            1 -> Off
-            2 -> On
-            c -> Other(c)
+            c.HINT_METRICS_DEFAULT -> Default
+            c.HINT_METRICS_OFF -> Off
+            c.HINT_METRICS_ON -> On
+            n -> Other(n)
 end HintMetrics
 
 // What a pattern does outside the area it was defined for. A gradient defaults to `Pad` and a
@@ -580,19 +580,19 @@ enum Extend
 
     code(self) -> int
         self match
-            Nothing -> 0
-            Repeat -> 1
-            Reflect -> 2
-            Pad -> 3
-            Other(c) -> c
+            Nothing -> c.EXTEND_NONE
+            Repeat -> c.EXTEND_REPEAT
+            Reflect -> c.EXTEND_REFLECT
+            Pad -> c.EXTEND_PAD
+            Other(n) -> n
 
     of(code: int) -> Extend
         code match
-            0 -> Nothing
-            1 -> Repeat
-            2 -> Reflect
-            3 -> Pad
-            c -> Other(c)
+            c.EXTEND_NONE -> Nothing
+            c.EXTEND_REPEAT -> Repeat
+            c.EXTEND_REFLECT -> Reflect
+            c.EXTEND_PAD -> Pad
+            n -> Other(n)
 end Extend
 
 // How a surface pattern is sampled when it is not at its natural size. `Nearest` is what pixel art
@@ -608,23 +608,23 @@ enum Filter
 
     code(self) -> int
         self match
-            Fast -> 0
-            Good -> 1
-            Best -> 2
-            Nearest -> 3
-            Bilinear -> 4
-            Gaussian -> 5
-            Other(c) -> c
+            Fast -> c.FILTER_FAST
+            Good -> c.FILTER_GOOD
+            Best -> c.FILTER_BEST
+            Nearest -> c.FILTER_NEAREST
+            Bilinear -> c.FILTER_BILINEAR
+            Gaussian -> c.FILTER_GAUSSIAN
+            Other(n) -> n
 
     of(code: int) -> Filter
         code match
-            0 -> Fast
-            1 -> Good
-            2 -> Best
-            3 -> Nearest
-            4 -> Bilinear
-            5 -> Gaussian
-            c -> Other(c)
+            c.FILTER_FAST -> Fast
+            c.FILTER_GOOD -> Good
+            c.FILTER_BEST -> Best
+            c.FILTER_NEAREST -> Nearest
+            c.FILTER_BILINEAR -> Bilinear
+            c.FILTER_GAUSSIAN -> Gaussian
+            n -> Other(n)
 end Filter
 
 // What `Surface.kind` answers. Only the ones this package can produce are named; cairo has a dozen
@@ -639,21 +639,21 @@ enum SurfaceType
 
     code(self) -> int
         self match
-            Image -> 0
-            Pdf -> 1
-            Ps -> 2
-            Svg -> 10
-            Recording -> 16
-            Other(c) -> c
+            Image -> c.SURFACE_TYPE_IMAGE
+            Pdf -> c.SURFACE_TYPE_PDF
+            Ps -> c.SURFACE_TYPE_PS
+            Svg -> c.SURFACE_TYPE_SVG
+            Recording -> c.SURFACE_TYPE_RECORDING
+            Other(n) -> n
 
     of(code: int) -> SurfaceType
         code match
-            0 -> Image
-            1 -> Pdf
-            2 -> Ps
-            10 -> Svg
-            16 -> Recording
-            c -> Other(c)
+            c.SURFACE_TYPE_IMAGE -> Image
+            c.SURFACE_TYPE_PDF -> Pdf
+            c.SURFACE_TYPE_PS -> Ps
+            c.SURFACE_TYPE_SVG -> Svg
+            c.SURFACE_TYPE_RECORDING -> Recording
+            n -> Other(n)
 end SurfaceType
 
 impl Display for SurfaceType
@@ -664,7 +664,7 @@ impl Display for SurfaceType
             Ps -> "postscript"
             Svg -> "svg"
             Recording -> "recording"
-            Other(c) -> "another backend"
+            Other(n) -> "another backend"
 
         display_str(s, out, fmt)
 
@@ -679,23 +679,23 @@ enum PatternType
 
     code(self) -> int
         self match
-            Solid -> 0
-            SurfacePattern -> 1
-            Linear -> 2
-            Radial -> 3
-            Mesh -> 4
-            RasterSource -> 5
-            Other(c) -> c
+            Solid -> c.PATTERN_TYPE_SOLID
+            SurfacePattern -> c.PATTERN_TYPE_SURFACE
+            Linear -> c.PATTERN_TYPE_LINEAR
+            Radial -> c.PATTERN_TYPE_RADIAL
+            Mesh -> c.PATTERN_TYPE_MESH
+            RasterSource -> c.PATTERN_TYPE_RASTER_SOURCE
+            Other(n) -> n
 
     of(code: int) -> PatternType
         code match
-            0 -> Solid
-            1 -> SurfacePattern
-            2 -> Linear
-            3 -> Radial
-            4 -> Mesh
-            5 -> RasterSource
-            c -> Other(c)
+            c.PATTERN_TYPE_SOLID -> Solid
+            c.PATTERN_TYPE_SURFACE -> SurfacePattern
+            c.PATTERN_TYPE_LINEAR -> Linear
+            c.PATTERN_TYPE_RADIAL -> Radial
+            c.PATTERN_TYPE_MESH -> Mesh
+            c.PATTERN_TYPE_RASTER_SOURCE -> RasterSource
+            n -> Other(n)
 end PatternType
 
 enum FontType
@@ -709,23 +709,23 @@ enum FontType
 
     code(self) -> int
         self match
-            Toy -> 0
-            Ft -> 1
-            Win32 -> 2
-            Quartz -> 3
-            User -> 4
-            DWrite -> 5
-            Other(c) -> c
+            Toy -> c.FONT_TYPE_TOY
+            Ft -> c.FONT_TYPE_FT
+            Win32 -> c.FONT_TYPE_WIN32
+            Quartz -> c.FONT_TYPE_QUARTZ
+            User -> c.FONT_TYPE_USER
+            DWrite -> c.FONT_TYPE_DWRITE
+            Other(n) -> n
 
     of(code: int) -> FontType
         code match
-            0 -> Toy
-            1 -> Ft
-            2 -> Win32
-            3 -> Quartz
-            4 -> User
-            5 -> DWrite
-            c -> Other(c)
+            c.FONT_TYPE_TOY -> Toy
+            c.FONT_TYPE_FT -> Ft
+            c.FONT_TYPE_WIN32 -> Win32
+            c.FONT_TYPE_QUARTZ -> Quartz
+            c.FONT_TYPE_USER -> User
+            c.FONT_TYPE_DWRITE -> DWrite
+            n -> Other(n)
 end FontType
 
 // ## The vector backends' own values
@@ -739,15 +739,15 @@ enum PdfVersion
 
     code(self) -> int
         self match
-            V1_4 -> 0
-            V1_5 -> 1
-            V1_6 -> 2
-            V1_7 -> 3
-            Other(c) -> c
+            V1_4 -> c.PDF_VERSION_1_4
+            V1_5 -> c.PDF_VERSION_1_5
+            V1_6 -> c.PDF_VERSION_1_6
+            V1_7 -> c.PDF_VERSION_1_7
+            Other(n) -> n
 
     // The name of a PDF version, as `"PDF 1.7"`.
     name(self) -> string =
-        from_cstring(externs.pdf_version_to_string(self.code())).unwrap_or("unknown")
+        from_cstring(c.pdf_version_to_string(self.code())).unwrap_or("unknown")
 end PdfVersion
 
 impl Display for PdfVersion
@@ -765,13 +765,13 @@ enum PdfMetadata
 
     code(self) -> int
         self match
-            Title -> 0
-            Author -> 1
-            Subject -> 2
-            Keywords -> 3
-            Creator -> 4
-            CreateDate -> 5
-            ModDate -> 6
+            Title -> c.PDF_METADATA_TITLE
+            Author -> c.PDF_METADATA_AUTHOR
+            Subject -> c.PDF_METADATA_SUBJECT
+            Keywords -> c.PDF_METADATA_KEYWORDS
+            Creator -> c.PDF_METADATA_CREATOR
+            CreateDate -> c.PDF_METADATA_CREATE_DATE
+            ModDate -> c.PDF_METADATA_MOD_DATE
 end PdfMetadata
 
 enum SvgVersion
@@ -781,12 +781,12 @@ enum SvgVersion
 
     code(self) -> int
         self match
-            V1_1 -> 0
-            V1_2 -> 1
-            Other(c) -> c
+            V1_1 -> c.SVG_VERSION_1_1
+            V1_2 -> c.SVG_VERSION_1_2
+            Other(n) -> n
 
     name(self) -> string =
-        from_cstring(externs.svg_version_to_string(self.code())).unwrap_or("unknown")
+        from_cstring(c.svg_version_to_string(self.code())).unwrap_or("unknown")
 end SvgVersion
 
 impl Display for SvgVersion
@@ -798,9 +798,9 @@ struct OutlineFlags
     bits: int
 
     // Expanded when the document opens, rather than collapsed.
-    open() -> OutlineFlags = OutlineFlags(0x1)
-    bold() -> OutlineFlags = OutlineFlags(0x2)
-    italic() -> OutlineFlags = OutlineFlags(0x4)
+    open() -> OutlineFlags = OutlineFlags(c.PDF_OUTLINE_FLAG_OPEN)
+    bold() -> OutlineFlags = OutlineFlags(c.PDF_OUTLINE_FLAG_BOLD)
+    italic() -> OutlineFlags = OutlineFlags(c.PDF_OUTLINE_FLAG_ITALIC)
 
     // No flags at all, which is the ordinary entry.
     plain() -> OutlineFlags = OutlineFlags(0)
@@ -808,9 +808,6 @@ end OutlineFlags
 
 impl BitOr for OutlineFlags
     bitor(self, rhs: OutlineFlags) -> OutlineFlags = OutlineFlags(self.bits | rhs.bits)
-
-// The parent of a top-level outline entry.
-const OUTLINE_ROOT: int = 0
 
 // ## Tag names for `Context.tag_begin`
 //
@@ -830,10 +827,10 @@ const TAG_CONTENT_REF: string = "cairo.content_ref"
 // ## The library itself
 
 // Which cairo this program is linked against, as its own three-part string.
-version() -> string = from_cstring(externs.version_string()).unwrap_or("unknown")
+version() -> string = from_cstring(c.version_string()).unwrap_or("unknown")
 
 // The same, encoded as `major * 10000 + minor * 100 + micro`, which is what a comparison wants.
-version_number() -> int = externs.version()
+version_number() -> int = c.version()
 
 // ## Comparing and printing them
 //
@@ -913,7 +910,7 @@ impl Display for Content
             Color -> "colour"
             Alpha -> "alpha"
             ColorAlpha -> "colour and alpha"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -949,7 +946,7 @@ impl Display for Operator
             HslSaturation -> "hsl-saturation"
             HslColor -> "hsl-colour"
             HslLuminosity -> "hsl-luminosity"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -963,7 +960,7 @@ impl Display for Antialias
             Fast -> "fast"
             Good -> "good"
             Best -> "best"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -972,7 +969,7 @@ impl Display for FillRule
         val s = self match
             Winding -> "winding"
             EvenOdd -> "even-odd"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -982,7 +979,7 @@ impl Display for LineCap
             Butt -> "butt"
             Round -> "round"
             Square -> "square"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -992,7 +989,7 @@ impl Display for LineJoin
             Miter -> "miter"
             Round -> "round"
             Bevel -> "bevel"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -1002,7 +999,7 @@ impl Display for FontSlant
             Normal -> "normal"
             Italic -> "italic"
             Oblique -> "oblique"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -1011,7 +1008,7 @@ impl Display for FontWeight
         val s = self match
             Normal -> "normal"
             Bold -> "bold"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -1023,7 +1020,7 @@ impl Display for SubpixelOrder
             Bgr -> "bgr"
             Vrgb -> "vrgb"
             Vbgr -> "vbgr"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -1035,7 +1032,7 @@ impl Display for HintStyle
             Slight -> "slight"
             Medium -> "medium"
             Full -> "full"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -1045,7 +1042,7 @@ impl Display for HintMetrics
             Default -> "default"
             Off -> "off"
             On -> "on"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -1056,7 +1053,7 @@ impl Display for Extend
             Repeat -> "repeat"
             Reflect -> "reflect"
             Pad -> "pad"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -1069,7 +1066,7 @@ impl Display for Filter
             Nearest -> "nearest"
             Bilinear -> "bilinear"
             Gaussian -> "gaussian"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -1082,7 +1079,7 @@ impl Display for PatternType
             Radial -> "radial"
             Mesh -> "mesh"
             RasterSource -> "raster source"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 
@@ -1095,7 +1092,7 @@ impl Display for FontType
             Quartz -> "quartz"
             User -> "user"
             DWrite -> "directwrite"
-            Other(c) -> "an unknown value"
+            Other(n) -> "an unknown value"
 
         display_str(s, out, fmt)
 

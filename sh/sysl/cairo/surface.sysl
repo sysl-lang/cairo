@@ -13,60 +13,60 @@
 
 module sh.sysl.cairo
 
-import sh.sysl.cairo.externs
+import sh.sysl.cairo.c
 import sysl.buf.{Buf, buf}
 import sysl.text.{cstring, from_cstring}
 import sysl.slices.as_ptr
 
 // Where drawing lands. Made by one of the constructors below.
 struct Surface
-    handle: *externs.Surface
+    handle: *c.Surface
 
     // What has gone wrong on this surface, if anything. Sticky: the first failure is the one
     // reported, and every later call on the surface does nothing.
-    status(&self) -> Status = Status.of(externs.surface_status(self.handle))
+    status(&self) -> Status = Status.of(c.surface_status(self.handle))
 
     // Whether the surface is usable — the check a constructor's caller makes.
     ok(&self) -> bool = self.status().ok()
 
     // Which backend this is.
-    kind(&self) -> SurfaceType = SurfaceType.of(externs.surface_get_type(self.handle))
+    kind(&self) -> SurfaceType = SurfaceType.of(c.surface_get_type(self.handle))
 
     // Whether it holds colour, alpha or both.
-    content(&self) -> Content = Content.of(externs.surface_get_content(self.handle))
+    content(&self) -> Content = Content.of(c.surface_get_content(self.handle))
 
     // How many references cairo is holding. Not the same number as sysl's, and rarely interesting:
     // a pattern or a context made from this surface has taken one of its own.
-    reference_count(&self) -> uint = externs.surface_get_reference_count(self.handle)
+    reference_count(&self) -> uint = c.surface_get_reference_count(self.handle)
 
     // Finish the surface: no more drawing is accepted, and a file backend flushes and closes. A PDF
     // is complete once this has happened or the last reference has gone.
-    finish(&self) = externs.surface_finish(self.handle)
+    finish(&self) = c.surface_finish(self.handle)
 
     // Make sure cairo has written everything it is holding, before the pixels are read directly.
-    flush(&self) = externs.surface_flush(self.handle)
+    flush(&self) = c.surface_flush(self.handle)
 
     // Tell cairo the pixels were changed behind its back, after writing them directly. The whole
     // surface, or one rectangle of it.
-    mark_dirty(&self) = externs.surface_mark_dirty(self.handle)
+    mark_dirty(&self) = c.surface_mark_dirty(self.handle)
     mark_dirty_rect(&self, x: int, y: int, width: int, height: int) =
-        externs.surface_mark_dirty_rectangle(self.handle, x, y, width, height)
+        c.surface_mark_dirty_rectangle(self.handle, x, y, width, height)
 
     // Start a new page, on a backend that has pages. `show_page` clears the page as it emits it;
     // `copy_page` keeps its contents for the next one.
-    show_page(&self) = externs.surface_show_page(self.handle)
-    copy_page(&self) = externs.surface_copy_page(self.handle)
+    show_page(&self) = c.surface_show_page(self.handle)
+    copy_page(&self) = c.surface_copy_page(self.handle)
 
     // Shift or scale everything drawn on this surface, in device space. A device scale of 2 is how a
     // drawing written in points renders at twice the resolution without any coordinate changing.
-    set_device_offset(&self, x: real, y: real) = externs.surface_set_device_offset(self.handle, x, y)
-    set_device_scale(&self, x: real, y: real) = externs.surface_set_device_scale(self.handle, x, y)
+    set_device_offset(&self, x: real, y: real) = c.surface_set_device_offset(self.handle, x, y)
+    set_device_scale(&self, x: real, y: real) = c.surface_set_device_scale(self.handle, x, y)
 
     device_offset(&self) -> (real, real)
         var x = 0.0
         var y = 0.0
 
-        externs.surface_get_device_offset(self.handle, &x, &y)
+        c.surface_get_device_offset(self.handle, &x, &y)
         (x, y)
     end device_offset
 
@@ -74,31 +74,31 @@ struct Surface
         var x = 1.0
         var y = 1.0
 
-        externs.surface_get_device_scale(self.handle, &x, &y)
+        c.surface_get_device_scale(self.handle, &x, &y)
         (x, y)
     end device_scale
 
     // Another surface of the same kind, which is how an intermediate is made that the backend can
     // composite efficiently. `similar_image` forces pixels even where this surface has none.
     similar(&self, content: Content, width: int, height: int) -> &Surface =
-        Surface(externs.surface_create_similar(self.handle, content.code(), width, height))
+        Surface(c.surface_create_similar(self.handle, content.code(), width, height))
 
     similar_image(&self, format: Format, width: int, height: int) -> &Surface =
-        Surface(externs.surface_create_similar_image(self.handle, format.code(), width, height))
+        Surface(c.surface_create_similar_image(self.handle, format.code(), width, height))
 
     // A window onto a rectangle of this surface, drawing through to the original.
     sub(&self, x: real, y: real, width: real, height: real) -> &Surface =
-        Surface(externs.surface_create_for_rectangle(self.handle, x, y, width, height))
+        Surface(c.surface_create_for_rectangle(self.handle, x, y, width, height))
 
     // ---- what only an image surface answers ----
 
-    width(&self) -> int = externs.image_surface_get_width(self.handle)
-    height(&self) -> int = externs.image_surface_get_height(self.handle)
+    width(&self) -> int = c.image_surface_get_width(self.handle)
+    height(&self) -> int = c.image_surface_get_height(self.handle)
 
     // Bytes from the start of one row to the start of the next. Not `width * 4`: cairo pads rows.
-    stride(&self) -> int = externs.image_surface_get_stride(self.handle)
+    stride(&self) -> int = c.image_surface_get_stride(self.handle)
 
-    format(&self) -> Format = Format.of(externs.image_surface_get_format(self.handle))
+    format(&self) -> Format = Format.of(c.image_surface_get_format(self.handle))
 
     // The pixels themselves, as a slice over cairo's own storage. `flush` first if anything has been
     // drawn, and `mark_dirty` afterwards if anything here is written.
@@ -106,9 +106,9 @@ struct Surface
     // **`Argb32` is premultiplied**, and on a little-endian machine the bytes of a pixel are B, G,
     // R, A — so opaque red is `0, 0, 255, 255`.
     data(&self) -> []u8
-        val n = usize(externs.image_surface_get_stride(self.handle)) * usize(externs.image_surface_get_height(self.handle))
+        val n = usize(c.image_surface_get_stride(self.handle)) * usize(c.image_surface_get_height(self.handle))
 
-        externs.image_surface_get_data(self.handle)[0..<n]
+        c.image_surface_get_data(self.handle)[0..<n]
     end data
 
     // ---- PNG ----
@@ -117,7 +117,7 @@ struct Surface
     write_png(&self, filename: string) -> Status
         var name = cstring(filename)
 
-        Status.of(externs.surface_write_to_png(self.handle, name.ptr))
+        Status.of(c.surface_write_to_png(self.handle, name.ptr))
     end write_png
 
     // Encode the surface as a PNG **into memory**, which is what a program serving an image over a
@@ -127,7 +127,7 @@ struct Surface
     // caller's choosing; here that pointer is the buffer being filled.
     png_bytes(&self) -> Result[Buf[u8], Status]
         var sink: Buf[u8] = buf()
-        val code = externs.surface_write_to_png_stream(self.handle, &png_write, ptr_cast(&sink))
+        val code = c.surface_write_to_png_stream(self.handle, &png_write, ptr_cast(&sink))
 
         if code == 0 then Ok(sink) else Err(Status.of(code))
     end png_bytes
@@ -136,7 +136,7 @@ end Surface
 // Cairo counts references and so does `&T`, so the last `&Surface` to go is what releases the C
 // object — unless a pattern or a context took a count of its own, in which case it outlives this.
 impl Drop for Surface
-    drop(self) = externs.surface_destroy(self.handle)
+    drop(self) = c.surface_destroy(self.handle)
 
 // The trampoline cairo calls with each block of an encoded PNG. It is an ordinary sysl function
 // whose address is taken; the `closure` is whatever was handed to the stream call, cast back.
@@ -175,26 +175,26 @@ end png_read
 
 // Pixels in memory, `width` by `height`, every one of them transparent to start with.
 image_surface(format: Format, width: int, height: int) -> &Surface =
-    Surface(externs.image_surface_create(format.code(), width, height))
+    Surface(c.image_surface_create(format.code(), width, height))
 
 // Pixels the **caller** already owns. Nothing is allocated for them and releasing the surface does
 // not free them, so the buffer must outlive it. `Format.stride_for_width` says how long a row must
 // be.
 image_surface_for_data(pixels: []u8, format: Format, width: int, height: int, stride: int) -> &Surface =
-    Surface(externs.image_surface_create_for_data(as_ptr(pixels), format.code(), width, height, stride))
+    Surface(c.image_surface_create_for_data(as_ptr(pixels), format.code(), width, height, stride))
 
 // Read a PNG file into a new image surface.
 png_surface(filename: string) -> &Surface
     var name = cstring(filename)
 
-    Surface(externs.image_surface_create_from_png(name.ptr))
+    Surface(c.image_surface_create_from_png(name.ptr))
 end png_surface
 
 // Read a PNG that is already in memory.
 png_surface_from_bytes(bytes: []const u8) -> &Surface
     var src = PngSource(as_ptr(bytes), bytes.len, 0)
 
-    Surface(externs.image_surface_create_from_png_stream(&png_read, ptr_cast(&src)))
+    Surface(c.image_surface_create_from_png_stream(&png_read, ptr_cast(&src)))
 end png_surface_from_bytes
 
 // A PDF being written to `filename`, whose page is `width` by `height` **in points** — 72 to the
@@ -202,34 +202,34 @@ end png_surface_from_bytes
 pdf_surface(filename: string, width: real, height: real) -> &Surface
     var name = cstring(filename)
 
-    Surface(externs.pdf_surface_create(name.ptr, width, height))
+    Surface(c.pdf_surface_create(name.ptr, width, height))
 end pdf_surface
 
 // An SVG being written to `filename`, in points.
 svg_surface(filename: string, width: real, height: real) -> &Surface
     var name = cstring(filename)
 
-    Surface(externs.svg_surface_create(name.ptr, width, height))
+    Surface(c.svg_surface_create(name.ptr, width, height))
 end svg_surface
 
 // A PostScript file being written to `filename`, in points.
 ps_surface(filename: string, width: real, height: real) -> &Surface
     var name = cstring(filename)
 
-    Surface(externs.ps_surface_create(name.ptr, width, height))
+    Surface(c.ps_surface_create(name.ptr, width, height))
 end ps_surface
 
 // A surface that records what is drawn rather than drawing it, to be replayed onto another surface
 // as a pattern. Unbounded, so it may be drawn on anywhere.
 recording_surface(content: Content) -> &Surface =
-    Surface(externs.recording_surface_create(content.code(), null))
+    Surface(c.recording_surface_create(content.code(), null))
 
 // The same, bounded to a rectangle, which is what lets `ink_extents` be meaningful.
 recording_surface_bounded(content: Content, x: real, y: real, width: real, height: real) -> &Surface
     var extents = [x, y, width, height]
     val e = extents[0..<4]
 
-    Surface(externs.recording_surface_create(content.code(), as_ptr(e)))
+    Surface(c.recording_surface_create(content.code(), as_ptr(e)))
 end recording_surface_bounded
 
 // The smallest rectangle holding everything drawn on a recording surface, as `(x, y, width, height)`.
@@ -239,7 +239,7 @@ ink_extents(s: &Surface) -> (real, real, real, real)
     var w = 0.0
     var h = 0.0
 
-    externs.recording_surface_ink_extents(s.handle, &x, &y, &w, &h)
+    c.recording_surface_ink_extents(s.handle, &x, &y, &w, &h)
     (x, y, w, h)
 end ink_extents
 
@@ -250,16 +250,16 @@ end ink_extents
 
 // Hold the PDF to a version older readers understand.
 pdf_restrict_to_version(s: &Surface, version: PdfVersion) =
-    externs.pdf_surface_restrict_to_version(s.handle, version.code())
+    c.pdf_surface_restrict_to_version(s.handle, version.code())
 
 // Change the page size, before anything is drawn on the new page.
-pdf_set_size(s: &Surface, width: real, height: real) = externs.pdf_surface_set_size(s.handle, width, height)
+pdf_set_size(s: &Surface, width: real, height: real) = c.pdf_surface_set_size(s.handle, width, height)
 
 // Set one of the document's standard metadata fields.
 pdf_set_metadata(s: &Surface, metadata: PdfMetadata, value: string)
     var v = cstring(value)
 
-    externs.pdf_surface_set_metadata(s.handle, metadata.code(), v.ptr)
+    c.pdf_surface_set_metadata(s.handle, metadata.code(), v.ptr)
 end pdf_set_metadata
 
 // Set a field of your own, which lands in the document information dictionary.
@@ -267,43 +267,48 @@ pdf_set_custom_metadata(s: &Surface, name: string, value: string)
     var n = cstring(name)
     var v = cstring(value)
 
-    externs.pdf_surface_set_custom_metadata(s.handle, n.ptr, v.ptr)
+    c.pdf_surface_set_custom_metadata(s.handle, n.ptr, v.ptr)
 end pdf_set_custom_metadata
 
 // What the viewer shows for the current page instead of its number — `"Cover"`, or `"iv"`.
 pdf_set_page_label(s: &Surface, label: string)
     var l = cstring(label)
 
-    externs.pdf_surface_set_page_label(s.handle, l.ptr)
+    c.pdf_surface_set_page_label(s.handle, l.ptr)
 end pdf_set_page_label
 
 // Embed a thumbnail of each page from here on. Zero by zero turns it off again.
 pdf_set_thumbnail_size(s: &Surface, width: int, height: int) =
-    externs.pdf_surface_set_thumbnail_size(s.handle, width, height)
+    c.pdf_surface_set_thumbnail_size(s.handle, width, height)
 
-// Add an entry to the viewer's bookmark sidebar, under `parent` — `OUTLINE_ROOT` for a top-level
-// one. `link` is a destination in the same words a `TAG_LINK` takes, as `dest='top'`. Answers the id
-// of the new entry, which is what a child entry names as its parent.
-pdf_add_outline(s: &Surface, parent: int, name: string, link: string, flags: OutlineFlags) -> int
+// Add an entry to the viewer's bookmark sidebar. `link` is a destination in the same words a
+// `TAG_LINK` takes, as `dest='top'`. Answers the id of the new entry, which is what a child entry
+// names as its parent.
+//
+// **`parent` is an `Option`, and `None` is a top-level entry.** Cairo spells that as a magic zero;
+// an absent parent is what it means, and saying so costs nothing and reads as what it is.
+pdf_add_outline(s: &Surface, parent: Option[int], name: string, link: string,
+                flags: OutlineFlags) -> int
     var n = cstring(name)
     var l = cstring(link)
+    val under = parent.unwrap_or(c.PDF_OUTLINE_ROOT)
 
-    externs.pdf_surface_add_outline(s.handle, parent, n.ptr, l.ptr, flags.bits)
+    c.pdf_surface_add_outline(s.handle, under, n.ptr, l.ptr, flags.bits)
 end pdf_add_outline
 
 // Hold the SVG to a version.
 svg_restrict_to_version(s: &Surface, version: SvgVersion) =
-    externs.svg_surface_restrict_to_version(s.handle, version.code())
+    c.svg_surface_restrict_to_version(s.handle, version.code())
 
 // Change the PostScript page size, before anything is drawn on the new page.
-ps_set_size(s: &Surface, width: real, height: real) = externs.ps_surface_set_size(s.handle, width, height)
+ps_set_size(s: &Surface, width: real, height: real) = c.ps_surface_set_size(s.handle, width, height)
 
 // Emit Encapsulated PostScript rather than a printable document. Must be set before drawing.
-ps_set_eps(s: &Surface, eps: bool) = externs.ps_surface_set_eps(s.handle, eps)
+ps_set_eps(s: &Surface, eps: bool) = c.ps_surface_set_eps(s.handle, eps)
 
 // Add a Document Structuring Convention comment, such as `"%%Title: my drawing"`.
 ps_dsc_comment(s: &Surface, comment: string)
-    var c = cstring(comment)
+    var text = cstring(comment)
 
-    externs.ps_surface_dsc_comment(s.handle, c.ptr)
+    c.ps_surface_dsc_comment(s.handle, text.ptr)
 end ps_dsc_comment

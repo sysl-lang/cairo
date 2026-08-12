@@ -670,7 +670,7 @@ the_same_drawing_goes_to_a_pdf()
     cr.tag_end(TAG_LINK)
     cr.tag_end("Document")
 
-    val id = pdf_add_outline(s, OUTLINE_ROOT, "Cover", "dest='top'", OutlineFlags.open() | OutlineFlags.bold())
+    val id = pdf_add_outline(s, None, "Cover", "dest='top'", OutlineFlags.open() | OutlineFlags.bold())
 
     assert(id > 0, "the outline entry was given an id")
     assert(cr.ok(), "and nothing went wrong writing any of it")

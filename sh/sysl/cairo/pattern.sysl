@@ -10,82 +10,82 @@
 
 module sh.sysl.cairo
 
-import sh.sysl.cairo.externs
+import sh.sysl.cairo.c
 
 // A source. Made by one of the constructors below, and released when the last reference goes.
 struct Pattern
-    handle: *externs.Pattern
+    handle: *c.Pattern
 
-    status(&self) -> Status = Status.of(externs.pattern_status(self.handle))
+    status(&self) -> Status = Status.of(c.pattern_status(self.handle))
     ok(&self) -> bool = self.status().ok()
 
     // Which of the kinds this is.
-    kind(&self) -> PatternType = PatternType.of(externs.pattern_get_type(self.handle))
+    kind(&self) -> PatternType = PatternType.of(c.pattern_get_type(self.handle))
 
     // Add a colour stop to a gradient, at `offset` along it — 0 at the start and 1 at the end.
     // Stops may be added in any order, and two at the same offset make a hard edge.
     //
     // Recorded as `Status.PatternTypeMismatch` if the pattern is not a gradient.
     add_color_stop_rgb(&self, offset: real, red: real, green: real, blue: real) =
-        externs.pattern_add_color_stop_rgb(self.handle, offset, red, green, blue)
+        c.pattern_add_color_stop_rgb(self.handle, offset, red, green, blue)
 
     add_color_stop_rgba(&self, offset: real, red: real, green: real, blue: real, alpha: real) =
-        externs.pattern_add_color_stop_rgba(self.handle, offset, red, green, blue, alpha)
+        c.pattern_add_color_stop_rgba(self.handle, offset, red, green, blue, alpha)
 
     // How many stops a gradient has. `None` where the pattern is not a gradient.
     color_stop_count(&self) -> Option[int]
         var n = 0
 
-        if externs.pattern_get_color_stop_count(self.handle, &n) == 0 then Some(n) else None
+        if c.pattern_get_color_stop_count(self.handle, &n) == 0 then Some(n) else None
     end color_stop_count
 
     // What happens outside the pattern's own area — nothing, tiling, mirrored tiling, or the edge
     // colour smeared outwards. A gradient defaults to `Extend.Pad` and a surface to `Extend.Nothing`.
-    set_extend(&self, extend: Extend) = externs.pattern_set_extend(self.handle, extend.code())
-    extend(&self) -> Extend = Extend.of(externs.pattern_get_extend(self.handle))
+    set_extend(&self, extend: Extend) = c.pattern_set_extend(self.handle, extend.code())
+    extend(&self) -> Extend = Extend.of(c.pattern_get_extend(self.handle))
 
     // How a surface pattern is sampled when it is not at its natural size. `Filter.Nearest` is what
     // pixel art wants; `Filter.Good` is the default.
-    set_filter(&self, filter: Filter) = externs.pattern_set_filter(self.handle, filter.code())
-    filter(&self) -> Filter = Filter.of(externs.pattern_get_filter(self.handle))
+    set_filter(&self, filter: Filter) = c.pattern_set_filter(self.handle, filter.code())
+    filter(&self) -> Filter = Filter.of(c.pattern_get_filter(self.handle))
 
     // The pattern's own matrix, which maps **user space to pattern space** — so to draw an image at
     // twice its size, scale this by a half.
     set_matrix(&self, matrix: Matrix)
         var m = matrix
 
-        externs.pattern_set_matrix(self.handle, m.ptr())
+        c.pattern_set_matrix(self.handle, m.ptr())
     end set_matrix
 
     matrix(&self) -> Matrix
         var m = identity()
 
-        externs.pattern_get_matrix(self.handle, m.ptr())
+        c.pattern_get_matrix(self.handle, m.ptr())
         m
     end matrix
 end Pattern
 
 impl Drop for Pattern
-    drop(self) = externs.pattern_destroy(self.handle)
+    drop(self) = c.pattern_destroy(self.handle)
 
 // A flat colour, as a pattern. Worth making only where a pattern is what is wanted — for a plain
 // fill, `Context.set_source_rgb` is the same thing with nothing to keep.
 solid_pattern(red: real, green: real, blue: real) -> &Pattern =
-    Pattern(externs.pattern_create_rgb(red, green, blue))
+    Pattern(c.pattern_create_rgb(red, green, blue))
 
 solid_pattern_rgba(red: real, green: real, blue: real, alpha: real) -> &Pattern =
-    Pattern(externs.pattern_create_rgba(red, green, blue, alpha))
+    Pattern(c.pattern_create_rgba(red, green, blue, alpha))
 
 // The contents of a surface, as a source. Cairo takes a reference to the surface, so the surface
 // lives for as long as the pattern does whatever happens to the caller's own reference.
 surface_pattern(surface: &Surface) -> &Pattern =
-    Pattern(externs.pattern_create_for_surface(surface.handle))
+    Pattern(c.pattern_create_for_surface(surface.handle))
 
 // A gradient along the line from `(x0, y0)` to `(x1, y1)`. It has no colour until stops are added.
 linear_pattern(x0: real, y0: real, x1: real, y1: real) -> &Pattern =
-    Pattern(externs.pattern_create_linear(x0, y0, x1, y1))
+    Pattern(c.pattern_create_linear(x0, y0, x1, y1))
 
 // A gradient between two circles, which is how a highlight is drawn: a small circle inside a large
 // one, offset towards where the light is.
 radial_pattern(cx0: real, cy0: real, radius0: real, cx1: real, cy1: real, radius1: real) -> &Pattern =
-    Pattern(externs.pattern_create_radial(cx0, cy0, radius0, cx1, cy1, radius1))
+    Pattern(c.pattern_create_radial(cx0, cy0, radius0, cx1, cy1, radius1))

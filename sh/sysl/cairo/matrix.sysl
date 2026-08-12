@@ -10,7 +10,7 @@
 
 module sh.sysl.cairo
 
-import sh.sysl.cairo.externs
+import sh.sysl.cairo.c
 
 // An affine transform, as cairo lays one out.
 //
@@ -33,20 +33,20 @@ struct Matrix
     ptr(*self) -> *real = ptr_cast(self)
 
     // Overwrite this matrix with the identity, or with a single translation, scale or rotation.
-    init_identity(*self) = externs.matrix_init_identity(self.ptr())
-    init_translate(*self, tx: real, ty: real) = externs.matrix_init_translate(self.ptr(), tx, ty)
-    init_scale(*self, sx: real, sy: real) = externs.matrix_init_scale(self.ptr(), sx, sy)
-    init_rotate(*self, radians: real) = externs.matrix_init_rotate(self.ptr(), radians)
+    init_identity(*self) = c.matrix_init_identity(self.ptr())
+    init_translate(*self, tx: real, ty: real) = c.matrix_init_translate(self.ptr(), tx, ty)
+    init_scale(*self, sx: real, sy: real) = c.matrix_init_scale(self.ptr(), sx, sy)
+    init_rotate(*self, radians: real) = c.matrix_init_rotate(self.ptr(), radians)
 
     // Apply a transform to this one, as though it happened before whatever this matrix already does.
-    translate(*self, tx: real, ty: real) = externs.matrix_translate(self.ptr(), tx, ty)
-    scale(*self, sx: real, sy: real) = externs.matrix_scale(self.ptr(), sx, sy)
-    rotate(*self, radians: real) = externs.matrix_rotate(self.ptr(), radians)
+    translate(*self, tx: real, ty: real) = c.matrix_translate(self.ptr(), tx, ty)
+    scale(*self, sx: real, sy: real) = c.matrix_scale(self.ptr(), sx, sy)
+    rotate(*self, radians: real) = c.matrix_rotate(self.ptr(), radians)
 
     // Replace this matrix with its inverse. Answers a status, because a matrix that squashes the
     // plane onto a line has none — that is `Status.InvalidMatrix`, and this is one of the few
     // places in cairo where a failure is returned rather than recorded.
-    invert(*self) -> Status = Status.of(externs.matrix_invert(self.ptr()))
+    invert(*self) -> Status = Status.of(c.matrix_invert(self.ptr()))
 
     // Transform a point, and transform a distance. A distance ignores the translation, which is the
     // whole difference between the two: a vector moves under rotation and scaling and not under a
@@ -58,7 +58,7 @@ struct Matrix
         var px = x
         var py = y
 
-        externs.matrix_transform_point(m.ptr(), &px, &py)
+        c.matrix_transform_point(m.ptr(), &px, &py)
         (px, py)
     end transform_point
 
@@ -67,7 +67,7 @@ struct Matrix
         var px = dx
         var py = dy
 
-        externs.matrix_transform_distance(m.ptr(), &px, &py)
+        c.matrix_transform_distance(m.ptr(), &px, &py)
         (px, py)
     end transform_distance
 end Matrix
@@ -81,7 +81,7 @@ multiply(a: Matrix, b: Matrix) -> Matrix
     var ma = a
     var mb = b
 
-    externs.matrix_multiply(result.ptr(), ma.ptr(), mb.ptr())
+    c.matrix_multiply(result.ptr(), ma.ptr(), mb.ptr())
     result
 end multiply
 

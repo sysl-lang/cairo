@@ -11,7 +11,7 @@ sudo apt install libcairo2-dev     # Debian / Ubuntu
 
 ```hocon
 dependencies {
-  cairo { git = "github.com/sysl-lang/cairo", version = "0.2.0" }
+  cairo { git = "github.com/sysl-lang/cairo", version = "0.3.0" }
 }
 ```
 
@@ -30,14 +30,27 @@ main()
     s.write_png("circle.png")
 ```
 
-The library has to be found at link time, which on a Homebrew machine is one flag:
+Two flags, one for each end — the library at link time, the headers at compile time:
 
 ```
-sysl run . --link-path /opt/homebrew/lib
+sysl run . --link-path /opt/homebrew/lib --include-path cairo=/opt/homebrew/include/cairo
 ```
 
-There is **no `--include-path`**, and that is worth noticing: this package compiles no C of its own,
-so no header is ever read. Only the linker needs to be told where cairo is.
+The headers are read because this package **asks the C compiler for cairo's constants** rather than
+transcribing them; see below. There is still no shim and no `.c` file here. Forget the include path and clang says
+`'cairo.h' file not found`, naming a header you never wrote. `package.hocon` says why a
+`requires { headers }` declaration — which would refuse that by name instead — is not there yet.
+
+**Running this package's own tests needs `CPATH`, for now.** `sysl test` drops `--include-path`
+before it asks the C compiler for a `c const` block, so the flag that works for `build` and `run`
+does not reach the probe:
+
+```
+CPATH=/opt/homebrew/include/cairo sysl test . --link-path /opt/homebrew/lib
+```
+
+That is a compiler defect rather than anything about this package; it is fixed on the compiler's
+`fix` branch, and this paragraph goes when a release carries it.
 
 The same drawing goes to a page
 -------------------------------
@@ -116,11 +129,38 @@ Each carries `code()` for the number C wants and `of(code)` for the number C gav
 `Other(code: int)` arm — so a cairo newer than this binding reporting something it has not heard of
 keeps a program running and printing rather than stopping at a `match` with no arm for it.
 
-The 138 values behind them were **checked against `cairo.h` by compiling them**, and they agree.
-They are still transcribed rather than asked of the C compiler with a `c const` block: doing that
-would make this package compile C for the first time, which turns "install libcairo" into "install
-the development headers and pass an include path". That is a trade to make deliberately, and it is
-not made here — which is why the `--include-path` note above still holds.
+**No number is written anywhere in this package.** Each of the 138 values is what the C compiler
+computes for cairo's own name, on the target being built:
+
+```sysl
+c const
+    STATUS_SUCCESS: int = "CAIRO_STATUS_SUCCESS"
+    FORMAT_ARGB32:  int = "CAIRO_FORMAT_ARGB32"
+```
+
+`15 §7` calls a transcribed constant "correct on one machine" with "nothing checking it". This is
+what it asks for instead, and it is the whole reason the headers are needed.
+
+Everything that is C lives in one place
+---------------------------------------
+
+`sh.sysl.cairo.c` — every `@link`, every `@include`, all 138 `c const`s, the six opaque handles and
+all 211 `extern`s, in one file that nothing outside the package is meant to call. The module beside
+it turns those into sysl and is what an application imports.
+
+The name is the point. A call site reads `c.surface_destroy(h)`, so crossing into C is visible
+without a comment:
+
+```sysl
+struct Surface
+    handle: *c.Surface
+
+    width(&self) -> int = c.image_surface_get_width(self.handle)
+```
+
+The split keeps two jobs apart. That file has to be **faithful** — a signature disagreeing with the
+header links perfectly and corrupts the call at run time — and this one has to be **pleasant**, which
+is a different question and would otherwise be answered in the same breath.
 
 What is here
 ------------
