@@ -11,7 +11,7 @@ sudo apt install libcairo2-dev     # Debian / Ubuntu
 
 ```hocon
 dependencies {
-  cairo { git = "github.com/sysl-lang/cairo", version = "0.3.0" }
+  cairo { git = "github.com/sysl-lang/cairo", version = "0.3.1" }
 }
 ```
 
@@ -37,20 +37,16 @@ sysl run . --link-path /opt/homebrew/lib --include-path cairo=/opt/homebrew/incl
 ```
 
 The headers are read because this package **asks the C compiler for cairo's constants** rather than
-transcribing them; see below. There is still no shim and no `.c` file here. Forget the include path and clang says
-`'cairo.h' file not found`, naming a header you never wrote. `package.hocon` says why a
-`requires { headers }` declaration — which would refuse that by name instead — is not there yet.
+transcribing them; see below. There is still no shim and no `.c` file here. Forget the include path
+and the build is refused by name: `package.hocon` declares `requires { headers { cairo = … } }`, so
+what comes back is a sentence saying which headers are wanted and how to install them, rather than
+clang's `'cairo.h' file not found` naming a file you never wrote.
 
-**Running this package's own tests needs `CPATH`, for now.** `sysl test` drops `--include-path`
-before it asks the C compiler for a `c const` block, so the flag that works for `build` and `run`
-does not reach the probe:
+The same two flags run this package's own tests:
 
 ```
-CPATH=/opt/homebrew/include/cairo sysl test . --link-path /opt/homebrew/lib
+sysl test . --link-path /opt/homebrew/lib --include-path cairo=/opt/homebrew/include/cairo
 ```
-
-That is a compiler defect rather than anything about this package; it is fixed on the compiler's
-`fix` branch, and this paragraph goes when a release carries it.
 
 The same drawing goes to a page
 -------------------------------
@@ -196,13 +192,13 @@ the program runs rather than about which has more features.
 Tests
 -----
 
-Thirty, and every one of them **draws for real and reads the result back** — a graphics binding that
-only checks return codes is checking that C was called rather than that the right thing happened.
-The image surface makes that cheap: a fill is asserted by looking at a pixel, a gradient by looking
-at both ends of one, a clip by finding paint on one side of it and none on the other.
+Thirty-five, and every one of them **draws for real and reads the result back** — a graphics binding
+that only checks return codes is checking that C was called rather than that the right thing
+happened. The image surface makes that cheap: a fill is asserted by looking at a pixel, a gradient by
+looking at both ends of one, a clip by finding paint on one side of it and none on the other.
 
 ```
-sysl test . --link-path /opt/homebrew/lib
+sysl test . --link-path /opt/homebrew/lib --include-path cairo=/opt/homebrew/include/cairo
 ```
 
 There is no shim
@@ -216,8 +212,8 @@ library is reachable by declaring it, and the `UsefulBufC` problem that reshaped
 
 The structs cairo does have — a matrix, the two kinds of extents, a glyph — are always written
 through a pointer into storage the *caller* owns, so a sysl struct with the same fields is handed
-over with `ptr_cast` and cairo writes back through it. `sh.sysl.cairo.externs` is the verbatim C
-surface and `sh.sysl.cairo` is what a program imports.
+over with `ptr_cast` and cairo writes back through it. `sh.sysl.cairo.c` is the verbatim C surface
+and `sh.sysl.cairo` is what a program imports.
 
 License
 -------

@@ -1,7 +1,7 @@
 // Cairo for sysl — 2D vector graphics, bound to https://www.cairographics.org/.
 //
 // There is no `dependencies` block because this binding depends on no other sysl package. What it
-// needs is a C library the machine already has, and `@link("cairo")` in the externs module is where
+// needs is a C library the machine already has, and `@link("cairo")` in the `c` module is where
 // that is said — the same arrangement as `sqlite3` and the SDL3 packages, and the opposite of
 // `plutovg`, `qoi` and `qcbor`, which carry their C with them.
 //
@@ -10,11 +10,11 @@
 // arrived against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       cairo { git = "github.com/sysl-lang/cairo", version = "0.3.0" }
+//       cairo { git = "github.com/sysl-lang/cairo", version = "0.3.1" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
-// tag `v0.3.0` on this repository.
+// tag `v0.3.1` on this repository.
 //
 // Cairo has to be installed, **and so do its headers**:
 //
@@ -29,7 +29,7 @@
 
 package {
   name    = "cairo"
-  version = "0.3.0"
+  version = "0.3.1"
 }
 
 // Cairo is a hosted library. It opens files — a PNG, a PDF, an SVG — and reaches the C runtime for
@@ -48,10 +48,12 @@ requires {
   os    = true
   heap  = true
 
-  // A `headers { cairo = "…" }` block belongs here, so that forgetting the include path is refused
-  // with a sentence rather than with clang's "'cairo.h' file not found" — a header the caller never
-  // wrote. It is **left out until the compiler carries the fix for `sysl test`**, because the two
-  // features currently contradict each other: the requirement is satisfied only by
-  // `--include-path cairo=<dir>`, and `sysl test` drops that flag before asking the C compiler for a
-  // `c const` block. Declaring it today would mean this package could not run its own tests at all.
+  // `sh.sysl.cairo.c` asks the C compiler for cairo's constants rather than transcribing them, so
+  // the headers are read at compile time and not only at link time. Saying so here turns a forgotten
+  // include path into one refusal naming cairo, rather than clang's "'cairo.h' file not found" — a
+  // file the caller never wrote and has no way to place. The sentence is the whole point of the key:
+  // it is read by someone who does not yet know what this package needs.
+  headers {
+    cairo = "cairo's own headers — `brew install cairo` puts them in /opt/homebrew/include/cairo, and Debian's libcairo2-dev in /usr/include/cairo"
+  }
 }
