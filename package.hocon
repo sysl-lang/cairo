@@ -10,11 +10,11 @@
 // arrived against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       cairo { git = "github.com/sysl-lang/cairo", version = "0.3.1" }
+//       cairo { git = "github.com/sysl-lang/cairo", version = "0.3.2" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
-// tag `v0.3.1` on this repository.
+// tag `v0.3.2` on this repository.
 //
 // Cairo has to be installed, **and so do its headers**:
 //
@@ -22,14 +22,21 @@
 //     sudo apt install libcairo2-dev     # Debian / Ubuntu
 //
 // The headers are read because `sh.sysl.cairo.c` asks the C compiler for cairo's own constants
-// rather than transcribing them. There is still no shim and no `.c` file here. On a Homebrew machine
-// that is two flags, one for each end:
+// rather than transcribing them. There is still no shim and no `.c` file here.
+//
+// **Where cairo lives is not something anybody has to type.** This package declares the library and
+// pkg-config is asked, so a consumer builds with no flags at all:
+//
+//     sysl build .
+//
+// It needs sysl 0.0.56 or later, which is where `requires { pkg_config }` arrives — an older compiler
+// reads the key as a capability and refuses it. Say it by hand on a machine with no pkg-config:
 //
 //     sysl build . --link-path /opt/homebrew/lib --include-path cairo=/opt/homebrew/include/cairo
 
 package {
   name    = "cairo"
-  version = "0.3.1"
+  version = "0.3.2"
 }
 
 // Cairo is a hosted library. It opens files — a PNG, a PDF, an SVG — and reaches the C runtime for
@@ -48,12 +55,21 @@ requires {
   os    = true
   heap  = true
 
-  // `sh.sysl.cairo.c` asks the C compiler for cairo's constants rather than transcribing them, so
-  // the headers are read at compile time and not only at link time. Saying so here turns a forgotten
-  // include path into one refusal naming cairo, rather than clang's "'cairo.h' file not found" — a
-  // file the caller never wrote and has no way to place. The sentence is the whole point of the key:
-  // it is read by someone who does not yet know what this package needs.
-  headers {
-    cairo = "cairo's own headers — `brew install cairo` puts them in /opt/homebrew/include/cairo, and Debian's libcairo2-dev in /usr/include/cairo"
+  // `sh.sysl.cairo.c` asks the C compiler for cairo's constants rather than transcribing them, so the
+  // headers are read at compile time and not only at link time — and `@link("cairo")` needs the
+  // library itself at the end of it. Both are one fact, *this machine must have cairo installed*, and
+  // cairo answers it itself: a `cairo.pc` sits beside the library wherever it was installed from, so
+  // the machine is asked rather than the reader.
+  //
+  // This replaces the `headers { cairo = … }` this file carried until 0.3.2, and does not sit beside
+  // it: the probe deliberately does not satisfy a header requirement, so declaring both would refuse
+  // every build that did not pass the flag the key exists to make unnecessary.
+  //
+  // Nothing is lost on a machine without pkg-config. `--include-path cairo=<dir>` answers this exactly
+  // as it answered the old key and stops the probe, so a hermetic build says where cairo is and is
+  // believed. The sentence is still the point of the key: it is read by someone who does not yet know
+  // what this package needs.
+  pkg_config {
+    cairo = "cairo — `brew install cairo` on macOS, Debian's libcairo2-dev, and pkg-config finds it either way"
   }
 }
