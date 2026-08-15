@@ -30,22 +30,28 @@ main()
     s.write_png("circle.png")
 ```
 
-Two flags, one for each end — the library at link time, the headers at compile time:
+Nothing about your machine, at either end:
 
 ```
-sysl run . --link-path /opt/homebrew/lib --include-path cairo=/opt/homebrew/include/cairo
+sysl run .
 ```
 
 The headers are read because this package **asks the C compiler for cairo's constants** rather than
-transcribing them; see below. There is still no shim and no `.c` file here. Forget the include path
-and the build is refused by name: `package.hocon` declares `requires { headers { cairo = … } }`, so
-what comes back is a sentence saying which headers are wanted and how to install them, rather than
-clang's `'cairo.h' file not found` naming a file you never wrote.
+transcribing them; see below. There is still no shim and no `.c` file here.
 
-The same two flags run this package's own tests:
+`package.hocon` declares `requires { pkg_config { cairo = … } }`, so the compiler asks pkg-config
+where cairo's headers and library are. Without cairo installed the build is refused by a sentence
+naming cairo and saying how to install it, rather than by clang's `'cairo.h' file not found` naming a
+file you never wrote. Until 0.3.2 this took two flags, one for each end, and the include one had to
+know that cairo's headers live in `include/cairo` rather than at the prefix.
+
+`--link-path <dir>` and `--include-path cairo=<dir>` still work and take precedence, on a machine with
+no pkg-config. **Needs sysl 0.0.56.**
+
+The same command runs this package's own tests:
 
 ```
-sysl test . --link-path /opt/homebrew/lib --include-path cairo=/opt/homebrew/include/cairo
+sysl test .
 ```
 
 The same drawing goes to a page
@@ -198,7 +204,7 @@ happened. The image surface makes that cheap: a fill is asserted by looking at a
 looking at both ends of one, a clip by finding paint on one side of it and none on the other.
 
 ```
-sysl test . --link-path /opt/homebrew/lib --include-path cairo=/opt/homebrew/include/cairo
+sysl test .
 ```
 
 There is no shim
