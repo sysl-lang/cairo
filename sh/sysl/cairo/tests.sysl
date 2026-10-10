@@ -512,6 +512,63 @@ text_measures_and_draws()
 end text_measures_and_draws
 
 @test
+text_in_a_callers_buffer_agrees_with_the_allocating_form()
+    var s = image_surface(Format.Argb32, 200, 60)
+    var cr = context(s)
+    var scratch: [64]u8
+
+    cr.select_font_face("serif", FontSlant.Normal, FontWeight.Bold)
+    cr.set_font_size(30.0)
+
+    val joy = cr.text_extents("joy")
+    val inb = cr.text_extents_in("joy", scratch[0..<64])
+
+    assert(inb.width > 0.0, "a non-empty string measures wider than nothing")
+    assert(inb.width == joy.width && inb.x_advance == joy.x_advance, "and agrees with text_extents")
+
+    // A string is not NUL-terminated: a slice of a longer string runs on in memory, and the
+    // terminator has to come from the binding rather than from luck.
+    val longer = "joyjoyjoy"
+    val part = longer[0..<3]
+    val cut = cr.text_extents_in(part, scratch[0..<64])
+
+    assert(cut.width == joy.width, "a slice measures as only its own bytes")
+
+    val none = cr.text_extents_in("", scratch[0..<64])
+
+    assert(none.width == 0.0 && none.x_advance == 0.0, "the empty string measures nothing")
+
+    // Too small a buffer cuts the text rather than overrunning: four bytes hold three and a NUL.
+    var small: [4]u8
+    val clipped = cr.text_extents_in("joyjoy", small[0..<4])
+
+    assert(clipped.width == joy.width, "a short buffer cuts at its size")
+
+    // 'é' is two bytes; a buffer that can hold one of them drops the character whole.
+    var two: [2]u8
+    val whole = cr.text_extents_in("é", two[0..<2])
+
+    assert(whole.width == 0.0, "a character is never split")
+
+    cr.set_source_rgb(0.0, 0.0, 0.0)
+    cr.move_to(10.0, 40.0)
+    cr.show_text_in(part, scratch[0..<64])
+    s.flush()
+
+    var inked = false
+
+    for y in 10..<50
+        for x in 10..<100
+            val (_, _, _, a) = pixel(s, x, y)
+
+            if a > 0u8 then inked = true
+
+    assert(inked, "show_text_in drew")
+    assert(cr.ok(), "and nothing went wrong")
+
+end text_in_a_callers_buffer_agrees_with_the_allocating_form
+
+@test
 a_scaled_font_measures_without_a_context()
     var s = image_surface(Format.Argb32, 8, 8)
     var cr = context(s)

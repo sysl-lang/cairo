@@ -375,6 +375,22 @@ struct Context
         e
     end text_extents
 
+    // `show_text` without the heap: the NUL cairo wants is written into `scratch`, which the caller
+    // owns, so a frame loop draws a label with no allocation and an `@no_alloc` library can be
+    // instantiated with a painter that calls this. **Text longer than `scratch.len - 1` bytes is cut**
+    // (never in the middle of a character), so size it for the longest label.
+    show_text_in(&self, text: string, scratch: []u8)
+        c.show_text(self.handle, terminate(text, scratch))
+    end show_text_in
+
+    // `text_extents` without the heap, on the same terms as `show_text_in`.
+    text_extents_in(&self, text: string, scratch: []u8) -> TextExtents
+        var e = text_extents()
+
+        c.text_extents(self.handle, terminate(text, scratch), e.ptr())
+        e
+    end text_extents_in
+
     // How much room the *font* takes, independently of any string — which is what line spacing is
     // computed from.
     font_extents(&self) -> FontExtents
@@ -423,6 +439,24 @@ end Context
 
 impl Drop for Context
     drop(self) = c.destroy(self.handle)
+
+// A NUL-terminated copy of `s` in storage the caller owns, and a pointer C can take. A string is not
+// NUL-terminated, so cairo cannot be handed its bytes directly. Cut to fit, backing up over any
+// UTF-8 continuation byte so a character is dropped whole rather than split.
+private terminate(s: string, into: []u8) -> *u8
+    assert(into.len > 0, "the scratch buffer has no room for even the terminator")
+
+    var n = if s.len < into.len - 1 then s.len else into.len - 1
+
+    while n > 0 && n < s.len && (s[n] & 0xC0) == 0x80
+        n -= 1
+
+    for i in 0..<n
+        into[i] = s[i]
+
+    into[n] = 0
+    as_ptr(into)
+end terminate
 
 // A context that draws on the given surface.
 //

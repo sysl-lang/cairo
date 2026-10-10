@@ -79,6 +79,10 @@ cr.show_text("sysl.sh")
 cr.tag_end(TAG_LINK)
 ```
 
+Where drawing must not allocate — a frame loop, or a `@no_alloc` library instantiated with a painter —
+`show_text_in(text, scratch)` and `text_extents_in(text, scratch)` write the terminator cairo wants
+into a buffer the caller owns instead of a heap copy. Text longer than the buffer is cut.
+
 Errors live on the object
 -------------------------
 

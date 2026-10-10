@@ -10,11 +10,11 @@
 // arrived against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       cairo { git = "github.com/sysl-lang/cairo", version = "0.3.2" }
+//       cairo { git = "github.com/sysl-lang/cairo", version = "0.3.3" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
-// tag `v0.3.2` on this repository.
+// tag `v0.3.3` on this repository.
 //
 // Cairo has to be installed, **and so do its headers**:
 //
@@ -36,7 +36,8 @@
 
 package {
   name    = "cairo"
-  version = "0.3.2"
+  version = "0.3.3"
+  sysl    = "0.1.0-alpha.8"
 }
 
 // Cairo is a hosted library. It opens files — a PNG, a PDF, an SVG — and reaches the C runtime for
