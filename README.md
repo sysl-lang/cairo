@@ -4,6 +4,8 @@ cairo
 Cairo for sysl — 2D vector graphics: paths, filling, stroking, dashing, gradients, clipping,
 transforms and text, rendered into memory or straight into a PDF, an SVG or a PostScript file.
 
+*An independent sysl package for Cairo. It is not affiliated with or endorsed by Cairo's authors or trademark holders.*
+
 ```
 brew install cairo                 # macOS
 sudo apt install libcairo2-dev     # Debian / Ubuntu
