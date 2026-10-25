@@ -10,11 +10,11 @@
 // arrived against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       cairo { git = "github.com/sysl-lang/cairo", version = "0.3.3" }
+//       cairo { git = "github.com/sysl-lang/cairo", version = "0.3.4" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
-// tag `v0.3.3` on this repository.
+// tag `v0.3.4` on this repository.
 //
 // Cairo has to be installed, **and so do its headers**:
 //
@@ -36,7 +36,7 @@
 
 package {
   name    = "cairo"
-  version = "0.3.3"
+  version = "0.3.4"
   sysl    = "0.6.0"
 }
 
