@@ -37,7 +37,7 @@
 package {
   name    = "cairo"
   version = "0.3.3"
-  sysl    = "0.1.0-alpha.8"
+  sysl    = "0.6.0"
 }
 
 // Cairo is a hosted library. It opens files — a PNG, a PDF, an SVG — and reaches the C runtime for

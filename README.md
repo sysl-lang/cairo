@@ -41,7 +41,7 @@ sysl run .
 The headers are read because this package **asks the C compiler for cairo's constants** rather than
 transcribing them; see below. There is still no shim and no `.c` file here.
 
-`package.hocon` declares `requires { pkg_config { cairo = … } }`, so the compiler asks pkg-config
+`sysl.hocon` declares `requires { pkg_config { cairo = … } }`, so the compiler asks pkg-config
 where cairo's headers and library are. Without cairo installed the build is refused by a sentence
 naming cairo and saying how to install it, rather than by clang's `'cairo.h' file not found` naming a
 file you never wrote. Until 0.3.2 this took two flags, one for each end, and the include one had to

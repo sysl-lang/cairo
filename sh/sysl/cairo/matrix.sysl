@@ -11,6 +11,7 @@
 module sh.sysl.cairo
 
 import sh.sysl.cairo.c
+import sysl.raw.ptr_cast
 
 // An affine transform, as cairo lays one out.
 //

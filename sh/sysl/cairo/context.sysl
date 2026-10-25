@@ -13,6 +13,7 @@ module sh.sysl.cairo
 import sh.sysl.cairo.c
 import sysl.text.cstring
 import sysl.slices.as_ptr
+import sysl.raw.ptr_cast
 
 // Draws on a `Surface`. Made with `context`, and released when the last reference goes.
 struct Context

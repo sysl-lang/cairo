@@ -17,6 +17,7 @@ import sh.sysl.cairo.c
 import sysl.buf.{Buf, buf}
 import sysl.text.{cstring, from_cstring}
 import sysl.slices.as_ptr
+import sysl.raw.ptr_cast
 
 // Where drawing lands. Made by one of the constructors below.
 struct Surface
